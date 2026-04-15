@@ -1,16 +1,19 @@
 const express = require("express");
 const app = express();
 
-// Middleware
+// ✅ THIS MUST BE ABOVE ROUTES
 app.use(express.json());
 
 // Routes
 const askRoute = require("./routes/ask");
-app.use("/ask", askRoute);
+const memoryRoute = require("./routes/memory");
 
-// Health check (optional but useful)
+app.use("/ask", askRoute);
+app.use("/memory", memoryRoute);
+
+// Health check
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", service: "voice-healthcare-backend" });
+  res.json({ status: "ok" });
 });
 
 module.exports = app;
