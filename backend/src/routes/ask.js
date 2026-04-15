@@ -1,3 +1,4 @@
+const { detectEmergency } = require("../utils/emergencyTriggers");
 const express = require("express");
 const router = express.Router();
 const qdrant = require("../qdrant"); // 👈 your existing file
@@ -25,10 +26,24 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: "query is required" });
   }
 
+if (detectEmergency(query)) {
+  return res.status(200).json({
+    emergency: true,
+    message:
+      "This sounds like a medical emergency. Please contact local emergency services immediately or go to the nearest hospital.",
+    actions: [
+      "Call emergency number",
+      "Alert nearby hospital",
+      "Notify emergency contact"
+    ]
+  });
+}
+
   // 🔹 Mock vector (real embeddings later)
   const vector = [0.1, 0.2, 0.3];
 
   // Save to Qdrant
+  try {
   await qdrant.upsert(COLLECTION_NAME, {
     points: [
       {
@@ -41,6 +56,9 @@ router.post("/", async (req, res) => {
       },
     ],
   });
+} catch (err) {
+  console.error("Qdrant upsert failed", err.message);
+}
 
   // 🔹 Mock response
   res.json({
