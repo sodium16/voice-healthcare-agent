@@ -2,25 +2,28 @@
 
 VAIDYA is a voice-first healthcare assistant prototype built for hackathon use cases where accessibility, speed, and clarity are critical. It helps users describe symptoms in natural language, receive simple actionable guidance, detect emergency signals, and personalize interactions using contextual memory.
 
-## Problem Statement
+## What It Delivers
 
-Many people, especially elderly users, low-literacy users, and people with disabilities, struggle with traditional healthcare apps because of complex interfaces, language barriers, and delayed guidance during emergencies.
+VAIDYA turns a health question into a guided conversation instead of a complex app flow. Users can speak naturally, get short and clear guidance, and receive the right next step based on the urgency of their situation.
 
-This project addresses that with a conversational, voice-oriented healthcare assistant focused on:
+The experience is designed around:
 
-- Simplicity
-- Accessibility
-- Real-time support
-- Action-oriented response
+- Voice-led interaction
+- Emergency-aware responses
+- Simple language for broad accessibility
+- Personalized context from prior interactions
 
-## Objective
+## Real-World Impact
 
-Build a working prototype where a user can:
+VAIDYA is designed for situations where fast, understandable support matters most:
 
-1. Speak a health-related concern
-2. Receive clear and simple guidance (not a diagnosis)
-3. Trigger emergency-aware behavior for critical situations
-4. Benefit from context and preferences remembered over time
+- Elderly users who prefer speaking over typing
+- Low-literacy users who need plain-language guidance
+- Families managing health concerns at home
+- People who need quick escalation during emergencies
+- Multilingual communities that benefit from more inclusive access paths
+
+In practical terms, this means the system can help reduce confusion, shorten response time, and make digital healthcare more approachable in everyday and high-stress situations.
 
 ## Key Features
 
@@ -116,6 +119,15 @@ Response example:
 
 - `GET /health` -> quick status
 - `GET /health/full` -> backend + service diagnostics
+
+## Key Capabilities in Practice
+
+- A user can speak a symptom or concern and receive a clear response immediately
+- Emergency phrases trigger panic-aware handling and urgent next-step guidance
+- The assistant can remember preferences such as language and speaking style
+- The response tone adapts to the detected emotional state
+- The backend can fall back to deterministic health guidance when AI access is unavailable
+- The architecture is modular, making it easy to extend into real clinic, telehealth, or community health workflows
 
 ## Requirement Coverage Matrix
 
