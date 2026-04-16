@@ -18,34 +18,37 @@ document.getElementById('current-user-id').textContent = API_CONFIG.userId;
 document.getElementById('current-location').textContent = API_CONFIG.location;
 
 // ── CURSOR ──
+// ── CURSOR FIX ──
 const cur = document.getElementById('cursor');
 const ring = document.getElementById('cursor-ring');
+// Only enable on devices with a precise pointer (mouse)
 const canUseCustomCursor = !!(cur && ring) && window.matchMedia('(pointer: fine)').matches;
 
 if (canUseCustomCursor) {
   document.body.classList.add('custom-cursor-enabled');
-  let mx = window.innerWidth / 2;
-  let my = window.innerHeight / 2;
-  let rx = mx;
-  let ry = my;
+  
+  let mx = 0;
+  let my = 0;
+  let rx = 0;
+  let ry = 0;
 
-  cur.style.left = mx + 'px';
-  cur.style.top = my + 'px';
-  ring.style.left = rx + 'px';
-  ring.style.top = ry + 'px';
-
-  document.addEventListener('mousemove', (e) => {
+  // Track mouse position globally
+  window.addEventListener('mousemove', (e) => {
     mx = e.clientX;
     my = e.clientY;
-    cur.style.left = mx + 'px';
-    cur.style.top = my + 'px';
+    
+    // Move the center dot immediately for responsiveness
+    cur.style.transform = `translate(${mx}px, ${my}px) translate(-50%, -50%)`;
   });
 
+  // Smooth animation for the outer ring
   function animRing() {
-    rx += (mx - rx) * 0.12;
-    ry += (my - ry) * 0.12;
-    ring.style.left = rx + 'px';
-    ring.style.top = ry + 'px';
+    // Linear interpolation for smoothness
+    rx += (mx - rx) * 0.15;
+    ry += (my - ry) * 0.15;
+    
+    ring.style.transform = `translate(${rx}px, ${ry}px) translate(-50%, -50%)`;
+    
     requestAnimationFrame(animRing);
   }
 

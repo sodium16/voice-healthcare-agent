@@ -40,20 +40,13 @@ body.custom-cursor-enabled {
 }
 
 /* CUSTOM CURSOR */
-#cursor {
-  position: fixed; width: 8px; height: 8px;
-  background: var(--emo-color); border-radius: 50%;
-  pointer-events: none; z-index: 9999;
-  transform: translate(-50%,-50%);
-  transition: width .15s, height .15s, background .3s;
-  mix-blend-mode: screen;
-}
-#cursor-ring {
-  position: fixed; width: 32px; height: 32px;
-  border: 1px solid rgba(0,210,255,0.4); border-radius: 50%;
-  pointer-events: none; z-index: 9998;
-  transform: translate(-50%,-50%);
-  transition: left .08s, top .08s, width .2s, height .2s, border-color .3s;
+#cursor, #cursor-ring {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none; /* Critical: allows you to click through the custom cursor */
+  z-index: 9999;
+  /* Remove the old transform from the CSS block so the JS can handle it */
 }
 
 /* EMERGENCY AMBULANCE BUTTON */
