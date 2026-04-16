@@ -31,8 +31,12 @@ body {
   color: var(--text);
   font-family: 'DM Sans', sans-serif;
   overflow-x: hidden;
-  cursor: none;
+  cursor: auto;
   min-height: 100vh;
+}
+
+body.custom-cursor-enabled {
+  cursor: none;
 }
 
 /* CUSTOM CURSOR */
@@ -252,7 +256,7 @@ body.listening .v-ring:nth-child(4) { animation: ringPulse 2s ease-in-out infini
   background: var(--panel);
   border: 2px solid var(--emo-color);
   color: var(--emo-color);
-  font-size: 24px; cursor: none;
+  font-size: 24px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   position: relative; z-index: 2;
   transition: all 0.3s;
@@ -296,7 +300,7 @@ body.listening .mic-label { color: var(--emo-color); }
   background: var(--emo-color);
   color: #000; font-weight: 500;
   font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
-  border: none; cursor: none;
+  border: none; cursor: pointer;
   clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
   transition: all 0.3s;
 }
@@ -385,7 +389,7 @@ body.listening .mic-label { color: var(--emo-color); }
   border: 1px solid var(--border);
   color: var(--text); font-size: 13px;
   letter-spacing: 0.04em; text-transform: uppercase;
-  cursor: none; transition: all 0.3s;
+  cursor: pointer; transition: all 0.3s;
   position: relative; overflow: hidden;
 }
 .action-btn:hover {
@@ -492,9 +496,16 @@ body.listening .mic-label { color: var(--emo-color); }
   flex: 1; padding: 8px 4px;
   font-family: 'Space Mono', monospace; font-size: 9px;
   letter-spacing: 0.15em; text-transform: uppercase;
-  border: 1px solid transparent; cursor: none;
+  border: 1px solid transparent; cursor: pointer;
   text-align: center; transition: all 0.3s;
   background: var(--panel);
+}
+
+body.custom-cursor-enabled .mic-btn,
+body.custom-cursor-enabled .send-btn,
+body.custom-cursor-enabled .action-btn,
+body.custom-cursor-enabled .emo-pill {
+  cursor: none;
 }
 .emo-pill.calm { color: var(--emotion-calm-color); border-color: rgba(0,210,255,0.3); }
 .emo-pill.concern { color: var(--emotion-concern-color); border-color: rgba(240,192,64,0.3); }

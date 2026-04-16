@@ -21,6 +21,7 @@ const env = {
   // AI/LLM (for fallback responses)
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || null,
   CLAUDE_API_KEY: process.env.CLAUDE_API_KEY || null,
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || null,
   
   // Frontend (CORS)
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5000',
@@ -42,8 +43,8 @@ function validateEnvironment() {
   // Required in production
   if (env.NODE_ENV === 'production') {
     if (!env.VAPI_API_KEY) errors.push('VAPI_API_KEY is required in production');
-    if (!env.OPENAI_API_KEY && !env.CLAUDE_API_KEY) {
-      errors.push('Either OPENAI_API_KEY or CLAUDE_API_KEY is required');
+    if (!env.OPENAI_API_KEY && !env.CLAUDE_API_KEY && !env.GEMINI_API_KEY) {
+      errors.push('Either OPENAI_API_KEY or CLAUDE_API_KEY or GEMINI_API_KEY is required');
     }
   }
   

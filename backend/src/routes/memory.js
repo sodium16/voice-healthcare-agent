@@ -64,6 +64,48 @@ router.post('/', async (req, res) => {
 
 /**
  * GET /memory?user_id=123
+ * Alternative query string syntax
+ */
+router.get('/', async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        error: 'user_id is required',
+      });
+    }
+
+    log.info('Retrieving memories via query', { user_id });
+
+    const memories = await qdrantService.getMemories(user_id);
+
+    const result = { user_id };
+    memories.forEach(mem => {
+      result[mem.key] = mem.value;
+    });
+
+    const duration = Date.now() - startTime;
+    log.apiCall('GET', `/memory?user_id=${user_id}`, HTTP_STATUS.OK, duration);
+
+    res.json(result);
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    log.error('Memory retrieval failed', error);
+    log.apiCall('GET', `/memory`, HTTP_STATUS.INTERNAL_ERROR, duration);
+
+    res.status(HTTP_STATUS.INTERNAL_ERROR).json({
+      error: 'Failed to retrieve memory',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /memory?user_id=123
  * Retrieve user memories
  * 
  * Response: { language, preference, ... }
@@ -100,6 +142,43 @@ router.get('/:user_id', async (req, res) => {
     const duration = Date.now() - startTime;
     log.error('Memory retrieval failed', error);
     log.apiCall('GET', `/memory/:user_id`, HTTP_STATUS.INTERNAL_ERROR, duration);
+
+    res.status(HTTP_STATUS.INTERNAL_ERROR).json({
+      error: 'Failed to retrieve memory',
+      message: error.message,
+    });
+  }
+});
+
+router.get('/', async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    const { user_id } = req.query;
+
+    if (!user_id) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        error: 'user_id is required',
+      });
+    }
+
+    log.info('Retrieving memories', { user_id });
+    const memories = await qdrantService.getMemories(user_id);
+
+    const result = { user_id };
+    memories.forEach(mem => {
+      result[mem.key] = mem.value;
+    });
+
+    const duration = Date.now() - startTime;
+    log.apiCall('GET', `/memory?user_id=${user_id}`, HTTP_STATUS.OK, duration);
+
+    res.json(result);
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    log.error('Memory retrieval failed', error);
+    log.apiCall('GET', `/memory`, HTTP_STATUS.INTERNAL_ERROR, duration);
 
     res.status(HTTP_STATUS.INTERNAL_ERROR).json({
       error: 'Failed to retrieve memory',

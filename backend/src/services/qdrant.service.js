@@ -31,7 +31,7 @@ class QdrantService {
       this.isReady = true;
       log.info('Qdrant service initialized');
     } catch (error) {
-      log.error('Failed to initialize Qdrant', error.message);
+      log.error('Failed to initialize Qdrant', error.response?.data || error);
     }
   }
 
@@ -43,10 +43,13 @@ class QdrantService {
       await this.client.getCollection(collectionName);
       log.debug(`Collection "${collectionName}" already exists`);
     } catch (error) {
-      if (error.status === 404) {
+      if (error.status === 404 || error.statusCode === 404) {
         log.info(`Creating collection "${collectionName}"`);
         await this.client.createCollection(collectionName, {
-          vectors: vectorConfig,
+          vectors: {
+            size: vectorConfig.SIZE,
+            distance: vectorConfig.DISTANCE,
+          }
         });
       } else {
         throw error;
@@ -115,7 +118,7 @@ class QdrantService {
         filter: {
           must: [
             {
-              key: 'userId',
+              key: 'user_id',
               match: {
                 value: userId,
               },
