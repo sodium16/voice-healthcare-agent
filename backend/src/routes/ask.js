@@ -1,71 +1,127 @@
-const { detectEmergency } = require("../utils/emergencyTriggers");
-const express = require("express");
+// ─────────────────────────────────────────────────────────────────────────────
+// /ASK ROUTE - Main health query endpoint
+// Handles user queries and returns AI-generated responses
+// ─────────────────────────────────────────────────────────────────────────────
+
+const express = require('express');
 const router = express.Router();
-const qdrant = require("../qdrant"); // 👈 your existing file
 
-const COLLECTION_NAME = "health_queries";
+const aiService = require('../services/ai.service');
+const emergencyService = require('../services/emergency.service');
+const qdrantService = require('../services/qdrant.service');
+const log = require('../config/logger')('AskRoute');
+const { API_CONTRACT, DEFAULT_RESPONSES, HTTP_STATUS } = require('../config/constants');
 
-// Create collection once
-(async () => {
+/**
+ * POST /ask
+ * Main endpoint for health queries
+ * 
+ * Request body: { user_id, query, location? }
+ * Response: { response, actions, emotion }
+ */
+router.post('/', async (req, res) => {
+  const startTime = Date.now();
+  
   try {
-    await qdrant.createCollection(COLLECTION_NAME, {
-      vectors: {
-        size: 3,
-        distance: "Cosine",
-      },
-    });
-  } catch (err) {
-    // collection probably already exists — ignore
-  }
-})();
+    const { user_id, query, location } = req.body;
 
-router.post("/", async (req, res) => {
-  const { query } = req.body;
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1. VALIDATE REQUEST
+    // ─────────────────────────────────────────────────────────────────────────
+    
+    if (!user_id || !query) {
+      log.warn('Invalid request - missing fields', { user_id, query: !!query });
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({
+        error: 'Missing required fields: user_id, query',
+        suggestion: 'Check API contract in docs/api-contract.md',
+      });
+    }
 
-  if (!query) {
-    return res.status(400).json({ error: "query is required" });
-  }
+    const queryTrimmed = query.trim();
+    if (queryTrimmed.length === 0) {
+      log.warn('Empty query received', { user_id });
+      return res.status(HTTP_STATUS.BAD_REQUEST).json(DEFAULT_RESPONSES.INVALID_INPUT);
+    }
 
-if (detectEmergency(query)) {
-  return res.status(200).json({
-    emergency: true,
-    message:
-      "This sounds like a medical emergency. Please contact local emergency services immediately or go to the nearest hospital.",
-    actions: [
-      "Call emergency number",
-      "Alert nearby hospital",
-      "Notify emergency contact"
-    ]
-  });
-}
+    log.info('Processing query', { user_id, query: queryTrimmed.substring(0, 50) });
 
-  // 🔹 Mock vector (real embeddings later)
-  const vector = [0.1, 0.2, 0.3];
-
-  // Save to Qdrant
-  try {
-  await qdrant.upsert(COLLECTION_NAME, {
-    points: [
-      {
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2. CHECK FOR EMERGENCY
+    // ─────────────────────────────────────────────────────────────────────────
+    
+    const emergency = emergencyService.analyzeQuery(queryTrimmed);
+    
+    if (emergency.isEmergency) {
+      log.warn('EMERGENCY DETECTED', { user_id, keywords: emergency.keywords });
+      
+      // Store emergency query in memory for audit
+      await qdrantService.storeQuery({
         id: Date.now(),
-        vector,
+        vector: new Array(384).fill(0.1), // Mock vector
         payload: {
-          query,
+          user_id,
+          query: queryTrimmed,
+          type: 'emergency',
           timestamp: new Date().toISOString(),
         },
-      },
-    ],
-  });
-} catch (err) {
-  console.error("Qdrant upsert failed", err.message);
-}
+      });
 
-  // 🔹 Mock response
-  res.json({
-    reply:
-      "I understand your concern. Please take rest and consult a doctor if symptoms persist.",
-    emergency: false,
-  });
+      return res.status(HTTP_STATUS.OK).json(emergencyService.getEmergencyResponse());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 3. GENERATE AI RESPONSE
+    // ─────────────────────────────────────────────────────────────────────────
+    
+    const aiResponse = await aiService.generateResponse(queryTrimmed);
+
+    // Check if concern was detected
+    if (emergency.isConcern) {
+      log.info('Concern detected', { user_id, keywords: emergency.keywords });
+      aiResponse.emotion = 'concern';
+    }
+
+    log.info('Response generated', { 
+      user_id, 
+      emotion: aiResponse.emotion,
+      actionCount: aiResponse.actions.length 
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 4. STORE INTERACTION IN MEMORY (ASYNC - don't wait)
+    // ─────────────────────────────────────────────────────────────────────────
+    
+    qdrantService.storeQuery({
+      id: Date.now(),
+      vector: new Array(384).fill(0.1), // Mock vector
+      payload: {
+        user_id,
+        query: queryTrimmed,
+        location: location || 'unknown',
+        emotion: aiResponse.emotion,
+        timestamp: new Date().toISOString(),
+      },
+    }).catch(err => log.error('Failed to store query', err));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 5. SEND RESPONSE
+    // ─────────────────────────────────────────────────────────────────────────
+    
+    const duration = Date.now() - startTime;
+    log.apiCall('POST', '/ask', HTTP_STATUS.OK, duration);
+
+    res.status(HTTP_STATUS.OK).json(aiResponse);
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    log.error('Request failed', error);
+    log.apiCall('POST', '/ask', HTTP_STATUS.INTERNAL_ERROR, duration);
+
+    res.status(HTTP_STATUS.INTERNAL_ERROR).json({
+      error: 'Internal server error',
+      message: error.message,
+    });
+  }
 });
 
 module.exports = router;

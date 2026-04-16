@@ -18,12 +18,42 @@ document.getElementById('current-user-id').textContent = API_CONFIG.userId;
 document.getElementById('current-location').textContent = API_CONFIG.location;
 
 // ── CURSOR ──
+// ── CURSOR FIX ──
 const cur = document.getElementById('cursor');
 const ring = document.getElementById('cursor-ring');
-let mx=0,my=0,rx=0,ry=0;
-document.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;cur.style.left=mx+'px';cur.style.top=my+'px';});
-function animRing(){rx+=(mx-rx)*0.12;ry+=(my-ry)*0.12;ring.style.left=rx+'px';ring.style.top=ry+'px';requestAnimationFrame(animRing);}
-animRing();
+// Only enable on devices with a precise pointer (mouse)
+const canUseCustomCursor = !!(cur && ring) && window.matchMedia('(pointer: fine)').matches;
+
+if (canUseCustomCursor) {
+  document.body.classList.add('custom-cursor-enabled');
+  
+  let mx = 0;
+  let my = 0;
+  let rx = 0;
+  let ry = 0;
+
+  // Track mouse position globally
+  window.addEventListener('mousemove', (e) => {
+    mx = e.clientX;
+    my = e.clientY;
+    
+    // Move the center dot immediately for responsiveness
+    cur.style.transform = `translate(${mx}px, ${my}px) translate(-50%, -50%)`;
+  });
+
+  // Smooth animation for the outer ring
+  function animRing() {
+    // Linear interpolation for smoothness
+    rx += (mx - rx) * 0.15;
+    ry += (my - ry) * 0.15;
+    
+    ring.style.transform = `translate(${rx}px, ${ry}px) translate(-50%, -50%)`;
+    
+    requestAnimationFrame(animRing);
+  }
+
+  animRing();
+}
 
 // ── LIVE TIME ──
 function updateTime(){
@@ -78,38 +108,32 @@ async function apiAsk(query) {
   
   console.log('📤 POST /ask', requestBody);
   
-  // Mock API response (replace with actual fetch when backend is ready)
-  // This follows the exact API contract
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const lq = query.toLowerCase();
-      let matched = mockResponses.find(r => r.query_match.some(k => lq.includes(k)));
-      const result = matched || defaultResponse;
-      
-      const response = {
-        response: result.response,
-        actions: result.actions,
-        emotion: result.emotion
-      };
-      
-      console.log('📥 API Response:', response);
-      resolve(response);
-    }, 1400);
-  });
-  
-  /* Uncomment when backend is ready:
   try {
     const response = await fetch(`${API_CONFIG.baseUrl}/ask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
     });
-    return await response.json();
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log('📥 API Response:', data);
+    return data;
   } catch (error) {
-    console.error('API Error:', error);
-    return defaultResponse;
+    console.error('❌ API Error:', error);
+    return getDefaultResponse();
   }
-  */
+}
+
+function getDefaultResponse() {
+  return {
+    response: 'Sorry, I could not process your request. Please check if the backend is running.',
+    actions: ['find_doctor'],
+    emotion: 'calm'
+  };
 }
 
 // POST /memory
@@ -122,44 +146,41 @@ async function apiStoreMemory(key, value) {
   
   console.log('📤 POST /memory', requestBody);
   
-  // Mock response
-  return { message: "stored" };
-  
-  /* Uncomment when backend is ready:
   try {
     const response = await fetch(`${API_CONFIG.baseUrl}/memory`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
     });
+    
     return await response.json();
   } catch (error) {
     console.error('Memory API Error:', error);
     return { message: "error" };
   }
-  */
 }
 
 // GET /memory
 async function apiGetMemory() {
   console.log('📤 GET /memory?user_id=' + API_CONFIG.userId);
   
-  // Mock response
-  return {
-    language: "english",
-    preference: "normal speech",
-    allergies: "none recorded"
-  };
-  
-  /* Uncomment when backend is ready:
   try {
-    const response = await fetch(`${API_CONFIG.baseUrl}/memory?user_id=${API_CONFIG.userId}`);
-    return await response.json();
+    const response = await fetch(
+      `${API_CONFIG.baseUrl}/memory/${API_CONFIG.userId}`,
+      { method: 'GET' }
+    );
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log('Memory loaded:', data);
+      return data;
+    }
+    
+    return {};
   } catch (error) {
     console.error('Memory API Error:', error);
     return {};
   }
-  */
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -286,11 +307,13 @@ const mockResponses = [
   }
 ];
 
-const defaultResponse = {
-  response: "I understand you have a health concern. Please describe your specific symptoms for more accurate guidance. I can help with: fever, headache, chest pain, breathing issues, colds, and more. For any emergency, use the EMERGENCY button.",
-  actions: ['find_doctor', 'find_hospital'],
-  emotion: 'calm'
-};
+function defaultResponse() {
+  return {
+    response: 'Sorry, I could not process your request. Please check if the backend is running.',
+    actions: ['find_doctor', 'find_hospital'],
+    emotion: 'calm'
+  };
+}
 
 const actionDefs = {
   call_ambulance: { icon: '🚑', label: 'Call Ambulance', cls: 'emergency' },
