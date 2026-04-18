@@ -1,181 +1,229 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// ARCHITECTURE: Frontend strictly follows API Contract
-// POST /ask -> { user_id, query, location } -> { response, actions, emotion }
-// POST /memory -> { user_id, key, value } -> { message: "stored" }
-// GET /memory?user_id -> { language, preference, ... }
-// All communication via API. No direct dependency between components.
+// VAIDYA FRONTEND — script.js (FIXED & COMPLETE)
+//
+// Changes from original:
+//  1. Language is sent in every /ask request
+//  2. Web Speech recognition lang updates from settings
+//  3. Geolocation loaded on start instead of hardcoded "Bangalore"
+//  4. TTS: if backend returns audioUrl, play it automatically
+//  5. callAmbulance() opens tel:108 on mobile
+//  6. Service Worker registered for offline fallback
 // ─────────────────────────────────────────────────────────────────────────────
 
-// API Configuration
+// ── SERVICE WORKER REGISTRATION ──────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(err => {
+      console.warn('SW registration failed:', err);
+    });
+  });
+}
+
+// ── API CONFIGURATION ─────────────────────────────────────────────────────────
 const API_CONFIG = {
-  baseUrl: 'http://localhost:3000', // Backend API endpoint
+  baseUrl: 'http://localhost:3000',
   userId: 'user_' + Math.random().toString(36).substr(2, 6),
-  location: 'Bangalore'
+  location: 'Bangalore', // default, overwritten by geolocation below
+  language: 'english',   // default, updated when user changes settings
 };
 
-// Update UI with current user and location
 document.getElementById('current-user-id').textContent = API_CONFIG.userId;
 document.getElementById('current-location').textContent = API_CONFIG.location;
 
-// ── CURSOR ──
-// ── CURSOR FIX ──
+// ── GEOLOCATION ───────────────────────────────────────────────────────────────
+// Get real city name via reverse geocoding (OpenStreetMap Nominatim, free)
+function initGeolocation() {
+  if (!navigator.geolocation) return;
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      try {
+        const { latitude, longitude } = pos.coords;
+        const url = `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        // Use city or town or district, falling back to state
+        const addr = data.address || {};
+        const city =
+          addr.city || addr.town || addr.village || addr.district || addr.state || 'India';
+
+        API_CONFIG.location = city;
+        document.getElementById('current-location').textContent = city;
+        document.getElementById('status-location') &&
+          (document.getElementById('status-location').textContent = city.toUpperCase());
+        console.log('📍 Location resolved:', city);
+      } catch (err) {
+        console.warn('Reverse geocoding failed, keeping default location', err);
+      }
+    },
+    (err) => {
+      console.warn('Geolocation denied, using default:', err.message);
+    },
+    { timeout: 8000 }
+  );
+}
+
+initGeolocation();
+
+// ── CUSTOM CURSOR ─────────────────────────────────────────────────────────────
 const cur = document.getElementById('cursor');
 const ring = document.getElementById('cursor-ring');
-// Only enable on devices with a precise pointer (mouse)
-const canUseCustomCursor = !!(cur && ring) && window.matchMedia('(pointer: fine)').matches;
+const canUseCustomCursor =
+  !!(cur && ring) && window.matchMedia('(pointer: fine)').matches;
 
 if (canUseCustomCursor) {
   document.body.classList.add('custom-cursor-enabled');
-  
-  let mx = 0;
-  let my = 0;
-  let rx = 0;
-  let ry = 0;
+  let mx = 0, my = 0, rx = 0, ry = 0;
 
-  // Track mouse position globally
   window.addEventListener('mousemove', (e) => {
     mx = e.clientX;
     my = e.clientY;
-    
-    // Move the center dot immediately for responsiveness
     cur.style.transform = `translate(${mx}px, ${my}px) translate(-50%, -50%)`;
+    // Reveal on first move (they start opacity:0 to avoid flash at 0,0)
+    cur.style.opacity = '1';
+    ring.style.opacity = '1';
   });
 
-  // Smooth animation for the outer ring
   function animRing() {
-    // Linear interpolation for smoothness
     rx += (mx - rx) * 0.15;
     ry += (my - ry) * 0.15;
-    
     ring.style.transform = `translate(${rx}px, ${ry}px) translate(-50%, -50%)`;
-    
     requestAnimationFrame(animRing);
   }
-
   animRing();
 }
 
-// ── LIVE TIME ──
-function updateTime(){
-  const now=new Date();
-  const t=now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  const el=document.getElementById('live-time'); if(el) el.textContent=t;
-  const f=document.getElementById('footer-time'); if(f) f.textContent=t;
+// ── LIVE TIME ─────────────────────────────────────────────────────────────────
+function updateTime() {
+  const t = new Date().toLocaleTimeString('en-IN', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const el = document.getElementById('live-time');
+  if (el) el.textContent = t;
+  const f = document.getElementById('footer-time');
+  if (f) f.textContent = t;
 }
-setInterval(updateTime,1000); updateTime();
+setInterval(updateTime, 1000);
+updateTime();
 
-// ── EMOTION STATE ──
+// ── EMOTION STATE ─────────────────────────────────────────────────────────────
 let currentEmotion = 'calm';
 
 function setEmotion(emotion) {
   currentEmotion = emotion;
   document.body.className = 'emotion-' + emotion;
+  if (canUseCustomCursor) document.body.classList.add('custom-cursor-enabled');
 
-  // Update badge
   const label = document.getElementById('emotion-label');
   const statusEmo = document.getElementById('status-emotion');
   const labels = { calm: 'CALM', concern: 'CONCERN DETECTED', panic: 'PANIC — EMERGENCY' };
-  label.textContent = labels[emotion];
-  statusEmo.textContent = emotion.toUpperCase();
+  if (label) label.textContent = labels[emotion];
+  if (statusEmo) statusEmo.textContent = emotion.toUpperCase();
 
-  // Pill active states
   document.querySelectorAll('.emo-pill').forEach(p => p.classList.remove('active'));
   const activePill = document.querySelector('.emo-pill.' + emotion);
   if (activePill) activePill.classList.add('active');
 
-  // Alert bars
   document.getElementById('panic-bar').classList.toggle('active', emotion === 'panic');
   document.getElementById('concern-bar').classList.toggle('active', emotion === 'concern');
 
-  // Nav logo color hint
-  document.querySelector('.nav-logo').style.color =
-    emotion === 'panic' ? 'var(--emotion-panic-color)' :
-    emotion === 'concern' ? 'var(--emotion-concern-color)' :
-    'var(--accent)';
+  const navLogo = document.querySelector('.nav-logo');
+  if (navLogo) {
+    navLogo.style.color =
+      emotion === 'panic' ? 'var(--emotion-panic-color)' :
+      emotion === 'concern' ? 'var(--emotion-concern-color)' :
+      'var(--accent)';
+  }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// API FUNCTIONS - Following exact contract
-// ─────────────────────────────────────────────────────────────────────────────
+// ── API HELPERS ───────────────────────────────────────────────────────────────
 
-// POST /ask
+// POST /ask  — now includes language
 async function apiAsk(query) {
   const requestBody = {
     user_id: API_CONFIG.userId,
-    query: query,
-    location: API_CONFIG.location
+    query,
+    location: API_CONFIG.location,
+    language: API_CONFIG.language,   // FIX: was missing before
   };
-  
+
   console.log('📤 POST /ask', requestBody);
-  
+
   try {
     const response = await fetch(`${API_CONFIG.baseUrl}/ask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
     });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
     const data = await response.json();
     console.log('📥 API Response:', data);
     return data;
   } catch (error) {
     console.error('❌ API Error:', error);
-    return getDefaultResponse();
+    // Try offline cache before showing error
+    return offlineFallback(query);
   }
 }
 
-function getDefaultResponse() {
+// Offline fallback — reads from SW-cached responses if available
+async function offlineFallback(query) {
+  try {
+    const resp = await fetch('/offline-responses.json');
+    const data = await resp.json();
+    const lower = query.toLowerCase();
+    const matched = data.find(r => r.keywords && r.keywords.some(k => lower.includes(k)));
+    if (matched) return matched;
+  } catch (_) { /* cache miss, no SW */ }
+
   return {
-    response: 'Sorry, I could not process your request. Please check if the backend is running.',
-    actions: ['find_doctor'],
-    emotion: 'calm'
+    response: 'Unable to connect to the server. Please check your internet connection.\n\nFor emergencies, call 108 immediately.',
+    actions: ['call_ambulance', 'emergency_info'],
+    emotion: 'calm',
   };
 }
 
 // POST /memory
 async function apiStoreMemory(key, value) {
-  const requestBody = {
-    user_id: API_CONFIG.userId,
-    key: key,
-    value: value
-  };
-  
-  console.log('📤 POST /memory', requestBody);
-  
   try {
     const response = await fetch(`${API_CONFIG.baseUrl}/memory`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({ user_id: API_CONFIG.userId, key, value }),
     });
-    
     return await response.json();
   } catch (error) {
     console.error('Memory API Error:', error);
-    return { message: "error" };
+    return { message: 'error' };
   }
 }
 
 // GET /memory
 async function apiGetMemory() {
-  console.log('📤 GET /memory?user_id=' + API_CONFIG.userId);
-  
   try {
-    const response = await fetch(
-      `${API_CONFIG.baseUrl}/memory/${API_CONFIG.userId}`,
-      { method: 'GET' }
-    );
-    
+    const response = await fetch(`${API_CONFIG.baseUrl}/memory/${API_CONFIG.userId}`);
     if (response.ok) {
       const data = await response.json();
+      // Restore saved language preference
+      if (data.language) {
+        API_CONFIG.language = data.language;
+        const sel = document.getElementById('language-select');
+        if (sel) sel.value = data.language;
+      }
+      // Restore saved theme
+      if (data.theme) {
+        const themeSel = document.getElementById('theme-select');
+        if (themeSel) {
+          themeSel.value = data.theme;
+          changeTheme();
+        }
+      }
       console.log('Memory loaded:', data);
       return data;
     }
-    
     return {};
   } catch (error) {
     console.error('Memory API Error:', error);
@@ -183,50 +231,59 @@ async function apiGetMemory() {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EMERGENCY AMBULANCE FUNCTION
-// ─────────────────────────────────────────────────────────────────────────────
+// ── TTS AUDIO PLAYBACK ────────────────────────────────────────────────────────
+// If the API response contains an audioUrl (base64 data URL from Vapi), play it.
+let currentAudio = null;
 
-function callAmbulance() {
-  console.log('🚑 EMERGENCY AMBULANCE CALLED');
-  
-  // Set panic emotion
-  setEmotion('panic');
-  
-  // Update response panel with emergency message
-  const responseEl = document.getElementById('response-text');
-  responseEl.classList.remove('empty');
-  responseEl.textContent = '🚨 EMERGENCY SERVICES ACTIVATED 🚨\n\nCalling ambulance (108)...\nStay calm. Help is on the way.\n\nNearest ambulance dispatched from Manipal Hospital.\nEstimated arrival: 4-6 minutes.\n\n📍 Your location: ' + API_CONFIG.location + '\n📞 Emergency contact: 108';
-  responseEl.style.whiteSpace = 'pre-line';
-  
-  // Add emergency actions
-  currentActions = ['call_ambulance', 'emergency_info', 'find_hospital'];
-  updateActionButtons(currentActions, 'panic');
-  
-  // Store in memory via API
-  apiStoreMemory('last_emergency', new Date().toISOString());
-  addMemory('🚨 Emergency ambulance called', 'EMERGENCY');
-  
-  // Scroll to response
-  document.getElementById('response-section').scrollIntoView({ behavior: 'smooth' });
+function playAudioResponse(audioUrl) {
+  if (!audioUrl) return;
+  // Stop any currently playing audio
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  currentAudio = new Audio(audioUrl);
+  currentAudio.play().catch(err => console.warn('Audio playback failed:', err));
 }
 
-// Expose to global scope for onclick
+// ── EMERGENCY BUTTON ──────────────────────────────────────────────────────────
+function callAmbulance() {
+  console.log('🚑 EMERGENCY AMBULANCE CALLED');
+
+  setEmotion('panic');
+
+  const responseEl = document.getElementById('response-text');
+  responseEl.classList.remove('empty');
+  responseEl.textContent =
+    '🚨 EMERGENCY SERVICES ACTIVATED 🚨\n\n' +
+    'Calling ambulance (108)...\n' +
+    'Stay calm. Help is on the way.\n\n' +
+    '📍 Your location: ' + API_CONFIG.location + '\n' +
+    '📞 Emergency: 108\n📞 Police: 100\n📞 Fire: 101';
+  responseEl.style.whiteSpace = 'pre-line';
+
+  currentActions = ['call_ambulance', 'emergency_info', 'find_hospital'];
+  updateActionButtons(currentActions, 'panic');
+
+  apiStoreMemory('last_emergency', new Date().toISOString());
+  addMemory('🚨 Emergency ambulance called', 'EMERGENCY');
+
+  document.getElementById('response-section').scrollIntoView({ behavior: 'smooth' });
+
+  // FIX: Actually open the phone dialer on mobile
+  setTimeout(() => {
+    window.location.href = 'tel:108';
+  }, 500); // small delay so the UI update renders first
+}
+
 window.callAmbulance = callAmbulance;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VOICE TOGGLE
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ── VOICE INPUT ───────────────────────────────────────────────────────────────
 let isListening = false;
 let recognition = null;
 
 function toggleListening() {
-  if (!isListening) {
-    startListening();
-  } else {
-    stopListening();
-  }
+  isListening ? stopListening() : startListening();
 }
 
 function startListening() {
@@ -235,12 +292,21 @@ function startListening() {
   document.getElementById('mic-btn').textContent = '⏹';
   document.getElementById('mic-label').textContent = 'LISTENING...';
 
+  // Stop any current TTS so the mic can hear clearly
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+
   if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     recognition = new SR();
-    recognition.lang = 'en-IN';
+
+    // FIX: Use the user's selected language, not hardcoded 'en-IN'
+    recognition.lang = languageToLocale(API_CONFIG.language);
     recognition.continuous = false;
     recognition.interimResults = false;
+
     recognition.onresult = (e) => {
       const transcript = e.results[0][0].transcript;
       document.getElementById('query-input').value = transcript;
@@ -248,12 +314,12 @@ function startListening() {
       submitQuery();
     };
     recognition.onerror = () => stopListening();
-    recognition.onend = () => stopListening();
+    recognition.onend = () => { if (isListening) stopListening(); };
     recognition.start();
   } else {
-    // Simulate if no browser support (demo mode)
+    // Demo fallback
     setTimeout(() => {
-      document.getElementById('query-input').value = 'I have chest pain and difficulty breathing';
+      document.getElementById('query-input').value = 'I have a fever and headache';
       stopListening();
       submitQuery();
     }, 2500);
@@ -265,56 +331,29 @@ function stopListening() {
   document.body.classList.remove('listening');
   document.getElementById('mic-btn').textContent = '🎙';
   document.getElementById('mic-label').textContent = 'TAP TO SPEAK';
-  if (recognition) { try { recognition.stop(); } catch(e){} }
+  if (recognition) { try { recognition.stop(); } catch (e) {} }
+}
+
+/**
+ * Map our language names to BCP-47 locale codes for Web Speech API
+ */
+function languageToLocale(lang) {
+  const map = {
+    english: 'en-IN',
+    hindi: 'hi-IN',
+    kannada: 'kn-IN',
+    tamil: 'ta-IN',
+    telugu: 'te-IN',
+    malayalam: 'ml-IN',
+    bengali: 'bn-IN',
+    marathi: 'mr-IN',
+  };
+  return map[lang] || 'en-IN';
 }
 
 window.toggleListening = toggleListening;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MOCK RESPONSES (Following API contract structure)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const mockResponses = [
-  {
-    query_match: ['chest', 'pain', 'breathing', 'breathe', 'heart'],
-    response: "⚠ This sounds serious. Chest pain with difficulty breathing can indicate a cardiac or respiratory emergency. Stop all activity immediately. Sit down and stay calm. Do not eat or drink anything. If pain is severe or worsens — call emergency services NOW.",
-    actions: ['call_ambulance', 'find_hospital', 'emergency_info'],
-    emotion: 'panic'
-  },
-  {
-    query_match: ['fever', 'temperature', 'hot', 'chills'],
-    response: "You may have a fever. Rest and stay hydrated — drink water or ORS. Take paracetamol (500mg) if fever is above 38°C. Monitor your temperature every 2–3 hours. If fever exceeds 39.5°C or persists for more than 3 days, consult a doctor.",
-    actions: ['find_doctor', 'find_pharmacy'],
-    emotion: 'concern'
-  },
-  {
-    query_match: ['headache', 'head', 'migraine'],
-    response: "For a headache, rest in a quiet, dark room. Stay hydrated and avoid bright screens. You can take a mild painkiller like paracetamol. If the headache is sudden and very severe, or is accompanied by vision changes or stiff neck — seek emergency care immediately.",
-    actions: ['find_doctor', 'find_pharmacy'],
-    emotion: 'concern'
-  },
-  {
-    query_match: ['cold', 'cough', 'runny', 'nose', 'sneeze'],
-    response: "This sounds like a common cold. Rest well and drink warm fluids — honey-ginger tea can help. You may take an OTC cold medicine. Avoid cold drinks and spicy food. If symptoms persist beyond 7 days or you develop high fever, consult a doctor.",
-    actions: ['find_doctor', 'find_pharmacy'],
-    emotion: 'calm'
-  },
-  {
-    query_match: ['emergency', 'help', 'accident', 'unconscious', 'faint', 'ambulance'],
-    response: "🚨 EMERGENCY DETECTED. Call 108 (ambulance) immediately. If the person is unconscious: check for breathing, place in recovery position. Do NOT move them if a spinal injury is suspected. Stay on the line with emergency services until help arrives.",
-    actions: ['call_ambulance', 'call_police', 'emergency_info', 'find_hospital'],
-    emotion: 'panic'
-  }
-];
-
-function defaultResponse() {
-  return {
-    response: 'Sorry, I could not process your request. Please check if the backend is running.',
-    actions: ['find_doctor', 'find_hospital'],
-    emotion: 'calm'
-  };
-}
-
+// ── ACTION DEFINITIONS ────────────────────────────────────────────────────────
 const actionDefs = {
   call_ambulance: { icon: '🚑', label: 'Call Ambulance', cls: 'emergency' },
   call_police:    { icon: '🚔', label: 'Call Emergency', cls: 'emergency' },
@@ -354,35 +393,32 @@ function handleAction(action) {
   const messages = {
     call_ambulance: 'Connecting to ambulance service (108)...',
     call_police:    'Connecting to emergency services (112)...',
-    find_hospital:  'Nearest hospital: Manipal Hospital — 2.4km (MG Road, Bangalore)',
-    find_doctor:    'Finding available doctors near you... 3 available within 5km',
-    find_pharmacy:  'Nearest pharmacy: Apollo Pharmacy — 0.8km (open 24hrs)',
-    emergency_info: 'Loading first aid instructions for your situation...',
+    find_hospital:  'Nearest hospital: ' + API_CONFIG.location + ' — searching...',
+    find_doctor:    'Finding available doctors near you...',
+    find_pharmacy:  'Finding nearest open pharmacy...',
+    emergency_info: 'Loading first aid instructions...',
   };
-  
+
   const responseEl = document.getElementById('response-text');
   responseEl.classList.remove('empty');
   responseEl.textContent += '\n\n◈ ' + (messages[action] || 'Processing...');
   responseEl.style.whiteSpace = 'pre-line';
-
   addMemory(messages[action], 'ACTION');
-  
-  // If ambulance action, trigger emergency
+
   if (action === 'call_ambulance') {
     callAmbulance();
   }
 }
 
+// ── MEMORY LIST HELPERS ───────────────────────────────────────────────────────
 function addMemory(text, type) {
   const list = document.getElementById('memory-list');
   const item = document.createElement('div');
   item.className = 'memory-item active fadeIn';
-  const now = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'});
+  const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   item.innerHTML = `${text}<span class="mem-time">${type} · ${now}</span>`;
   list.insertBefore(item, list.firstChild);
   if (list.children.length > 5) list.removeChild(list.lastChild);
-  
-  // Also update history
   updateHistory(text, type);
 }
 
@@ -390,18 +426,18 @@ function updateHistory(text, type) {
   const historyList = document.getElementById('history-list');
   const item = document.createElement('div');
   item.className = 'history-item fadeIn';
-  const now = new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'});
+  const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   item.innerHTML = `<strong>${type}</strong>: ${text} <span style="float:right;font-size:9px;">${now}</span>`;
   historyList.insertBefore(item, historyList.firstChild);
   if (historyList.children.length > 8) historyList.removeChild(historyList.lastChild);
 }
 
+// ── SUBMIT QUERY ──────────────────────────────────────────────────────────────
 async function submitQuery() {
   const input = document.getElementById('query-input');
   const query = input.value.trim();
   if (!query) return;
 
-  // Show typing indicator
   const typingDots = document.getElementById('typing-dots');
   const responseEl = document.getElementById('response-text');
   typingDots.classList.add('visible');
@@ -409,252 +445,238 @@ async function submitQuery() {
   responseEl.classList.remove('empty');
   input.value = '';
 
-  // Add to memory
   addMemory('"' + query + '"', 'QUERY');
 
-  // Call API (POST /ask)
   const result = await apiAsk(query);
 
   typingDots.classList.remove('visible');
 
-  // Set response text
   responseEl.textContent = result.response;
   responseEl.style.whiteSpace = 'pre-line';
   responseEl.classList.remove('empty');
   responseEl.classList.add('fadeIn');
 
-  // Set emotion
   setEmotion(result.emotion);
-
-  // Set actions
   currentActions = result.actions;
   updateActionButtons(result.actions, result.emotion);
 
-  // Store in memory via API
+  // FIX: Play TTS audio if backend returned one
+  if (result.audioUrl) {
+    playAudioResponse(result.audioUrl);
+  }
+
   addMemory('Response delivered · Emotion: ' + result.emotion.toUpperCase(), 'RESPONSE');
-  
-  // Scroll to response
   document.getElementById('response-section').scrollIntoView({ behavior: 'smooth' });
 }
 
-// Expose to global scope
 window.submitQuery = submitQuery;
 window.setEmotion = setEmotion;
 
-// Allow Enter key
 document.getElementById('query-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') submitQuery();
 });
 
-// Initialize memory on load
-(async function init() {
-  const memory = await apiGetMemory();
-  console.log('Memory loaded:', memory);
-})();
-
-// Smooth scroll for navigation links
+// ── SMOOTH SCROLL ─────────────────────────────────────────────────────────────
 document.querySelectorAll('a[href^="#"]').forEach(anchor => {
   anchor.addEventListener('click', function (e) {
     e.preventDefault();
     const target = document.querySelector(this.getAttribute('href'));
-    if (target) {
-      target.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (target) target.scrollIntoView({ behavior: 'smooth' });
   });
-});// ─────────────────────────────────────────────────────────────────────────────
+});
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+(async function init() {
+  await apiGetMemory();  // restores saved language + theme preferences
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SETTINGS FUNCTIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Language Settings
+// FIX: updateLanguage now updates API_CONFIG.language so every subsequent
+//      /ask call uses the correct language, and stores it in memory
 function updateLanguage() {
   const language = document.getElementById('language-select').value;
+  API_CONFIG.language = language;   // FIX: was missing before
   console.log('Language changed to:', language);
   addMemory('Language preference set to: ' + language, 'SETTING');
-  
-  // Store in memory via API
   apiStoreMemory('language', language);
 }
 
-// Speech Speed Slider
 const speedSlider = document.getElementById('speech-speed');
 const speedValue = document.getElementById('speed-value');
 if (speedSlider && speedValue) {
-  speedSlider.addEventListener('input', function() {
+  speedSlider.addEventListener('input', function () {
     const speed = parseFloat(this.value).toFixed(1);
-    const speedText = speed == 1.0 ? 'Normal' : (speed < 1.0 ? 'Slow' : 'Fast');
+    const speedText = speed == 1.0 ? 'Normal' : speed < 1.0 ? 'Slow' : 'Fast';
     speedValue.textContent = `${speedText} (${speed}x)`;
   });
 }
 
-// Alert Volume Slider
 const volumeSlider = document.getElementById('alert-volume');
 const volumeValue = document.getElementById('volume-value');
 if (volumeSlider && volumeValue) {
-  volumeSlider.addEventListener('input', function() {
+  volumeSlider.addEventListener('input', function () {
     volumeValue.textContent = this.value + '%';
   });
 }
 
-// High Contrast Mode
 function toggleHighContrast() {
   const checkbox = document.getElementById('high-contrast');
   document.body.classList.toggle('high-contrast', checkbox.checked);
   addMemory('High contrast mode: ' + (checkbox.checked ? 'ON' : 'OFF'), 'SETTING');
 }
 
-// Large Text Mode
 function toggleLargeText() {
   const checkbox = document.getElementById('large-text');
   document.body.classList.toggle('large-text', checkbox.checked);
   addMemory('Large text mode: ' + (checkbox.checked ? 'ON' : 'OFF'), 'SETTING');
 }
 
-// Reduced Motion
 function toggleReducedMotion() {
   const checkbox = document.getElementById('reduce-motion');
   document.body.classList.toggle('reduced-motion', checkbox.checked);
   addMemory('Reduced motion: ' + (checkbox.checked ? 'ON' : 'OFF'), 'SETTING');
 }
 
-// Screen Reader Optimization
 function toggleScreenReader() {
   const checkbox = document.getElementById('screen-reader');
   if (checkbox.checked) {
-    document.querySelectorAll('[aria-hidden]').forEach(el => el.setAttribute('aria-hidden', 'false'));
+    document.querySelectorAll('[aria-hidden]').forEach(el =>
+      el.setAttribute('aria-hidden', 'false')
+    );
   }
   addMemory('Screen reader mode: ' + (checkbox.checked ? 'ON' : 'OFF'), 'SETTING');
 }
 
-// Theme Change
 function changeTheme() {
   const theme = document.getElementById('theme-select').value;
   document.body.classList.remove('theme-darker', 'theme-blue', 'theme-purple');
-  if (theme !== 'dark') {
-    document.body.classList.add('theme-' + theme);
-  }
+  if (theme !== 'dark') document.body.classList.add('theme-' + theme);
   addMemory('Theme changed to: ' + theme, 'SETTING');
   apiStoreMemory('theme', theme);
 }
 
-// Save All Settings
 async function saveAllSettings() {
+  const g = id => document.getElementById(id);
   const settings = {
-    language: document.getElementById('language-select')?.value,
-    responseLanguage: document.getElementById('response-language')?.value,
-    speechSpeed: document.getElementById('speech-speed')?.value,
-    voiceGender: document.getElementById('voice-gender')?.value,
-    voicePitch: document.getElementById('voice-pitch')?.value,
-    highContrast: document.getElementById('high-contrast')?.checked,
-    largeText: document.getElementById('large-text')?.checked,
-    reduceMotion: document.getElementById('reduce-motion')?.checked,
-    screenReader: document.getElementById('screen-reader')?.checked,
-    soundAlerts: document.getElementById('sound-alerts')?.checked,
-    vibration: document.getElementById('vibration')?.checked,
-    emergencyAlerts: document.getElementById('emergency-alerts')?.checked,
-    alertVolume: document.getElementById('alert-volume')?.value,
-    ageGroup: document.getElementById('age-group')?.value,
-    userGender: document.getElementById('user-gender')?.value,
-    medicalHistory: document.getElementById('medical-history')?.value,
-    emergencyContact1: document.getElementById('emergency-contact-1')?.value,
-    emergencyContact2: document.getElementById('emergency-contact-2')?.value,
-    contactRelation: document.getElementById('contact-relation')?.value,
-    storeHistory: document.getElementById('store-history')?.checked,
-    shareAnalytics: document.getElementById('share-analytics')?.checked,
-    locationTracking: document.getElementById('location-tracking')?.checked,
-    theme: document.getElementById('theme-select')?.value,
-    fontSize: document.getElementById('font-size')?.value
+    language:          g('language-select')?.value,
+    responseLanguage:  g('response-language')?.value,
+    speechSpeed:       g('speech-speed')?.value,
+    voiceGender:       g('voice-gender')?.value,
+    voicePitch:        g('voice-pitch')?.value,
+    highContrast:      g('high-contrast')?.checked,
+    largeText:         g('large-text')?.checked,
+    reduceMotion:      g('reduce-motion')?.checked,
+    screenReader:      g('screen-reader')?.checked,
+    soundAlerts:       g('sound-alerts')?.checked,
+    vibration:         g('vibration')?.checked,
+    emergencyAlerts:   g('emergency-alerts')?.checked,
+    alertVolume:       g('alert-volume')?.value,
+    ageGroup:          g('age-group')?.value,
+    userGender:        g('user-gender')?.value,
+    medicalHistory:    g('medical-history')?.value,
+    emergencyContact1: g('emergency-contact-1')?.value,
+    emergencyContact2: g('emergency-contact-2')?.value,
+    contactRelation:   g('contact-relation')?.value,
+    storeHistory:      g('store-history')?.checked,
+    shareAnalytics:    g('share-analytics')?.checked,
+    locationTracking:  g('location-tracking')?.checked,
+    theme:             g('theme-select')?.value,
+    fontSize:          g('font-size')?.value,
   };
-  
-  console.log('Settings saved:', settings);
-  
-  // Store in memory via API
+
+  // Update in-memory language immediately
+  if (settings.language) API_CONFIG.language = settings.language;
+
   await apiStoreMemory('user_settings', JSON.stringify(settings));
-  
+  await apiStoreMemory('language', settings.language || 'english');
+  if (settings.theme) await apiStoreMemory('theme', settings.theme);
+
   addMemory('All settings saved successfully', 'SETTINGS');
-  
-  // Show confirmation
+
   const responseEl = document.getElementById('response-text');
   responseEl.classList.remove('empty');
   responseEl.textContent = '✅ Settings saved successfully!\n\nYour preferences have been updated and stored.';
   responseEl.style.whiteSpace = 'pre-line';
 }
 
-// Reset Settings
 function resetSettings() {
-  if (confirm('Reset all settings to default values?')) {
-    // Reset all form elements
-    document.getElementById('language-select').value = 'english';
-    document.getElementById('response-language').value = 'english';
-    document.getElementById('speech-speed').value = '1.0';
-    document.getElementById('speed-value').textContent = 'Normal (1.0x)';
-    document.getElementById('voice-gender').value = 'female';
-    document.getElementById('voice-pitch').value = 'medium';
-    document.getElementById('high-contrast').checked = false;
-    document.getElementById('large-text').checked = false;
-    document.getElementById('reduce-motion').checked = false;
-    document.getElementById('screen-reader').checked = false;
-    document.getElementById('sound-alerts').checked = true;
-    document.getElementById('vibration').checked = true;
-    document.getElementById('emergency-alerts').checked = true;
-    document.getElementById('alert-volume').value = '70';
-    document.getElementById('volume-value').textContent = '70%';
-    document.getElementById('age-group').value = 'adult';
-    document.getElementById('user-gender').value = 'female';
-    document.getElementById('medical-history').value = 'none';
-    document.getElementById('emergency-contact-1').value = '';
-    document.getElementById('emergency-contact-2').value = '';
-    document.getElementById('contact-relation').value = 'spouse';
-    document.getElementById('store-history').checked = true;
-    document.getElementById('share-analytics').checked = true;
-    document.getElementById('location-tracking').checked = true;
-    document.getElementById('theme-select').value = 'dark';
-    document.getElementById('font-size').value = 'medium';
-    
-    // Remove all theme classes
-    document.body.classList.remove('high-contrast', 'large-text', 'reduced-motion', 'theme-darker', 'theme-blue', 'theme-purple');
-    
-    addMemory('Settings reset to default', 'SETTINGS');
-    
-    const responseEl = document.getElementById('response-text');
-    responseEl.classList.remove('empty');
-    responseEl.textContent = '↻ Settings reset to default values.';
-  }
+  if (!confirm('Reset all settings to default values?')) return;
+
+  const g = id => document.getElementById(id);
+  g('language-select').value = 'english';
+  g('response-language').value = 'english';
+  g('speech-speed').value = '1.0';
+  g('speed-value').textContent = 'Normal (1.0x)';
+  g('voice-gender').value = 'female';
+  g('voice-pitch').value = 'medium';
+  g('high-contrast').checked = false;
+  g('large-text').checked = false;
+  g('reduce-motion').checked = false;
+  g('screen-reader').checked = false;
+  g('sound-alerts').checked = true;
+  g('vibration').checked = true;
+  g('emergency-alerts').checked = true;
+  g('alert-volume').value = '70';
+  g('volume-value').textContent = '70%';
+  g('age-group').value = 'adult';
+  g('user-gender').value = 'female';
+  g('medical-history').value = 'none';
+  g('emergency-contact-1').value = '';
+  g('emergency-contact-2').value = '';
+  g('contact-relation').value = 'spouse';
+  g('store-history').checked = true;
+  g('share-analytics').checked = true;
+  g('location-tracking').checked = true;
+  g('theme-select').value = 'dark';
+  g('font-size').value = 'medium';
+
+  API_CONFIG.language = 'english';
+
+  document.body.classList.remove(
+    'high-contrast', 'large-text', 'reduced-motion',
+    'theme-darker', 'theme-blue', 'theme-purple'
+  );
+
+  addMemory('Settings reset to default', 'SETTINGS');
+
+  const responseEl = document.getElementById('response-text');
+  responseEl.classList.remove('empty');
+  responseEl.textContent = '↻ Settings reset to default values.';
 }
 
-// Clear All Data
 function clearAllData() {
-  if (confirm('Clear all stored data? This cannot be undone!')) {
-    // Clear memory list
-    const memoryList = document.getElementById('memory-list');
-    memoryList.innerHTML = `
-      <div class="memory-item active">
-        Language: English · Speech: Normal speed
-        <span class="mem-time">PREFERENCE · DEFAULT</span>
-      </div>
-      <div class="memory-item">
-        No known allergies recorded
-        <span class="mem-time">MEDICAL · DEFAULT</span>
-      </div>
-      <div class="memory-item">
-        All data cleared · ${new Date().toLocaleTimeString()}
-        <span class="mem-time">SYSTEM · RESET</span>
-      </div>
-    `;
-    
-    // Clear history
-    const historyList = document.getElementById('history-list');
-    historyList.innerHTML = '<div class="history-item">Data cleared - Starting fresh</div>';
-    
-    addMemory('All user data cleared', 'SYSTEM');
-    
-    const responseEl = document.getElementById('response-text');
-    responseEl.classList.remove('empty');
-    responseEl.textContent = '🗑️ All stored data has been cleared.\n\nYour session has been reset.';
-    responseEl.style.whiteSpace = 'pre-line';
-  }
+  if (!confirm('Clear all stored data? This cannot be undone!')) return;
+
+  const memoryList = document.getElementById('memory-list');
+  memoryList.innerHTML = `
+    <div class="memory-item active">
+      Language: English · Speech: Normal speed
+      <span class="mem-time">PREFERENCE · DEFAULT</span>
+    </div>
+    <div class="memory-item">
+      No known allergies recorded
+      <span class="mem-time">MEDICAL · DEFAULT</span>
+    </div>
+    <div class="memory-item">
+      All data cleared · ${new Date().toLocaleTimeString()}
+      <span class="mem-time">SYSTEM · RESET</span>
+    </div>
+  `;
+
+  const historyList = document.getElementById('history-list');
+  historyList.innerHTML = '<div class="history-item">Data cleared — Starting fresh</div>';
+
+  addMemory('All user data cleared', 'SYSTEM');
+
+  const responseEl = document.getElementById('response-text');
+  responseEl.classList.remove('empty');
+  responseEl.textContent = '🗑️ All stored data has been cleared.\n\nYour session has been reset.';
+  responseEl.style.whiteSpace = 'pre-line';
 }
 
-// Expose functions to global scope
 window.updateLanguage = updateLanguage;
 window.toggleHighContrast = toggleHighContrast;
 window.toggleLargeText = toggleLargeText;
@@ -665,16 +687,10 @@ window.saveAllSettings = saveAllSettings;
 window.resetSettings = resetSettings;
 window.clearAllData = clearAllData;
 
-// Initialize settings event listeners
-document.addEventListener('DOMContentLoaded', function() {
-  // Initialize slider displays
+document.addEventListener('DOMContentLoaded', function () {
   const speedSlider = document.getElementById('speech-speed');
-  if (speedSlider) {
-    speedSlider.dispatchEvent(new Event('input'));
-  }
-  
+  if (speedSlider) speedSlider.dispatchEvent(new Event('input'));
+
   const volumeSlider = document.getElementById('alert-volume');
-  if (volumeSlider) {
-    volumeSlider.dispatchEvent(new Event('input'));
-  }
+  if (volumeSlider) volumeSlider.dispatchEvent(new Event('input'));
 });

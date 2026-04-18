@@ -39,14 +39,46 @@ body.custom-cursor-enabled {
   cursor: none;
 }
 
-/* CUSTOM CURSOR */
-#cursor, #cursor-ring {
+/* ── CUSTOM CURSOR (FIXED) ─────────────────────────────────────────────────── */
+/* Both elements must be fixed, pointer-events:none, and start at 0,0.        */
+/* The dot (#cursor) is small and solid.                                       */
+/* The ring (#cursor-ring) is larger, hollow, and lags behind via JS lerp.    */
+
+#cursor {
   position: fixed;
   top: 0;
   left: 0;
-  pointer-events: none; /* Critical: allows you to click through the custom cursor */
+  width: 8px;
+  height: 8px;
+  background: var(--emo-color);
+  border-radius: 50%;
+  pointer-events: none;
   z-index: 9999;
-  /* Remove the old transform from the CSS block so the JS can handle it */
+  /* transform is set entirely by JS — no CSS transform here */
+  transition: background 0.3s;
+  /* Hide until first mousemove so it doesn't sit at 0,0 on load */
+  opacity: 0;
+}
+
+#cursor-ring {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 32px;
+  height: 32px;
+  border: 1.5px solid var(--emo-color);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9998;
+  /* transform is set entirely by JS */
+  transition: border-color 0.3s;
+  opacity: 0;
+}
+
+/* Show both once the body class is applied and first move fires */
+body.custom-cursor-enabled #cursor,
+body.custom-cursor-enabled #cursor-ring {
+  opacity: 1;
 }
 
 /* EMERGENCY AMBULANCE BUTTON */
