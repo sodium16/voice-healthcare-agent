@@ -37,7 +37,7 @@ const HTTP_STATUS = {
 };
 
 const VECTOR_CONFIG = {
-  SIZE: 384,               // Embedding dimension (OpenAI default)
+  SIZE: 384,               // Embedding dimension (OpenAI default)`
   DISTANCE: 'Cosine',
 };
 

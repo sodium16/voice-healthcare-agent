@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// GEMINI SERVICE
+// GEMINI SERVICE (FIXED)
 // Real AI integration using Google's Generative AI API
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -10,23 +10,26 @@ const log = require('../config/logger')('GeminiService');
 class GeminiService {
   constructor() {
     if (!env.GEMINI_API_KEY) {
-      log.warn('Gemini API key not configured - using mock responses');
+      log.warn('⚠️  Gemini API key not configured - using mock responses only');
       this.isAvailable = false;
       this.client = null;
       this.model = null;
+      this.modelName = null;
       return;
     }
 
     try {
       this.client = new GoogleGenerativeAI(env.GEMINI_API_KEY);
-      this.model = this.client.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      this.modelName = 'gemini-flash-latest';
+      this.model = this.client.getGenerativeModel({ model: this.modelName });
       this.isAvailable = true;
-      log.info('✅ Gemini service initialized successfully');
+      log.info(`✅ Gemini service initialized successfully with model: ${this.modelName}`);
     } catch (error) {
       log.error('Failed to initialize Gemini', error.message);
       this.isAvailable = false;
       this.client = null;
       this.model = null;
+      this.modelName = null;
     }
   }
 
@@ -37,7 +40,7 @@ class GeminiService {
    */
   async generateHealthResponse(query) {
     if (!this.isAvailable || !this.model) {
-      throw new Error('Gemini service not available - check API key');
+      throw new Error('Gemini service not available - check API key configuration');
     }
 
     try {
@@ -78,7 +81,7 @@ Provide practical, immediately actionable guidance. Start directly without any p
 
       log.debug('Calling Gemini API', { 
         query: query.substring(0, 50),
-        modelUsed: 'gemini-pro'
+        modelUsed: this.modelName
       });
 
       const startTime = Date.now();
@@ -244,7 +247,7 @@ Return ONLY a JSON array with 2-3 action names. Example: ["action1", "action2"]`
     return {
       service: 'gemini',
       available: this.isAvailable,
-      model: this.isAvailable ? 'gemini-pro' : null,
+      model: this.isAvailable ? this.modelName : null,
       apiKeyConfigured: !!env.GEMINI_API_KEY,
       capabilities: [
         'health_guidance',
