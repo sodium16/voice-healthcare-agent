@@ -1,19 +1,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// VAIDYA FRONTEND — script.js (FIXED & COMPLETE)
+// VAIDYA FRONTEND — script.js (FIXED FOR PYTHON HTTP.SERVER)
 //
-// Changes from original:
-//  1. Language is sent in every /ask request
-//  2. Web Speech recognition lang updates from settings
-//  3. Geolocation loaded on start instead of hardcoded "Bangalore"
-//  4. TTS: if backend returns audioUrl, play it automatically
-//  5. callAmbulance() opens tel:108 on mobile
-//  6. Service Worker registered for offline fallback
+// Fixes applied:
+//  1. canUseCustomCursor was undefined → removed, use class check instead
+//  2. SW registered with ./sw.js (relative) not /sw.js (absolute)
+//  3. Vapi SDK must be loaded in index.html via CDN before this script
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── SERVICE WORKER REGISTRATION ──────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(err => {
+    // FIX: use relative path so it works regardless of where Python serves from
+    navigator.serviceWorker.register('./sw.js').catch(err => {
       console.warn('SW registration failed:', err);
     });
   });
@@ -23,15 +21,63 @@ if ('serviceWorker' in navigator) {
 const API_CONFIG = {
   baseUrl: 'http://localhost:3000',
   userId: 'user_' + Math.random().toString(36).substr(2, 6),
-  location: 'Bangalore', // default, overwritten by geolocation below
-  language: 'english',   // default, updated when user changes settings
+  location: 'Bangalore',
+  language: 'english',
 };
+
+// ── VAPI INTEGRATION ──────────────────────────────────────────────────────────
+// IMPORTANT: index.html must load the SDK before this script:
+// <script src="https://cdn.jsdelivr.net/npm/@vapi-ai/web/dist/vapi.iife.js"></script>
+const VAPI_CONFIG = {
+  publicKey: '8003a34f-24b4-48e5-96f2-519929403da7',
+  assistantId: 'b8fb51aa-75c2-4b95-87dc-05213f80c27d',
+};
+
+let vapi = null;
+let vapiCallActive = false;
+
+function initVapi() {
+  if (!window.Vapi) {
+    console.warn('Vapi SDK not loaded — add CDN script to index.html <head>');
+    return;
+  }
+  vapi = new window.Vapi(VAPI_CONFIG.publicKey);
+
+  vapi.on('message', (msg) => {
+    if (msg.type === 'transcript' && msg.transcriptType === 'final') {
+      document.getElementById('query-input').value = msg.transcript;
+    }
+  });
+
+  vapi.on('speech-start', () => {
+    document.getElementById('mic-label').textContent = 'ASSISTANT SPEAKING...';
+  });
+
+  vapi.on('speech-end', () => {
+    document.getElementById('mic-label').textContent = 'LISTENING...';
+  });
+
+  vapi.on('call-end', () => {
+    vapiCallActive = false;
+    isListening = false;
+    document.body.classList.remove('listening');
+    document.getElementById('mic-btn').textContent = '🎙';
+    document.getElementById('mic-label').textContent = 'TAP TO SPEAK';
+    console.log('Vapi call ended');
+  });
+
+  vapi.on('error', (e) => {
+    console.error('Vapi error:', e);
+    vapiCallActive = false;
+  });
+
+  console.log('✅ Vapi initialized');
+}
 
 document.getElementById('current-user-id').textContent = API_CONFIG.userId;
 document.getElementById('current-location').textContent = API_CONFIG.location;
 
 // ── GEOLOCATION ───────────────────────────────────────────────────────────────
-// Get real city name via reverse geocoding (OpenStreetMap Nominatim, free)
 function initGeolocation() {
   if (!navigator.geolocation) return;
 
@@ -43,15 +89,14 @@ function initGeolocation() {
         const resp = await fetch(url);
         const data = await resp.json();
 
-        // Use city or town or district, falling back to state
         const addr = data.address || {};
         const city =
           addr.city || addr.town || addr.village || addr.district || addr.state || 'India';
 
         API_CONFIG.location = city;
         document.getElementById('current-location').textContent = city;
-        document.getElementById('status-location') &&
-          (document.getElementById('status-location').textContent = city.toUpperCase());
+        const statusLoc = document.getElementById('status-location');
+        if (statusLoc) statusLoc.textContent = city.toUpperCase();
         console.log('📍 Location resolved:', city);
       } catch (err) {
         console.warn('Reverse geocoding failed, keeping default location', err);
@@ -67,31 +112,24 @@ function initGeolocation() {
 initGeolocation();
 
 // ── CUSTOM CURSOR ─────────────────────────────────────────────────────────────
-// ── CUSTOM CURSOR ─────────────────────────────────────────────────────────────
 const cur  = document.getElementById('cursor');
 const ring = document.getElementById('cursor-ring');
 
 if (cur && ring) {
-  // Enable on anything with a pointer (fine OR coarse) — removes the
-  // (pointer: fine) gate that silently kills the cursor in iframes / previews
   const hasPointer = window.matchMedia('(pointer: fine)').matches
                   || window.matchMedia('(pointer: coarse)').matches;
 
   if (hasPointer) {
     document.body.classList.add('custom-cursor-enabled');
 
-    let mx = -100, my = -100;   // start off-screen so no flash at 0,0
+    let mx = -100, my = -100;
     let rx = -100, ry = -100;
     let firstMove = false;
 
     window.addEventListener('mousemove', (e) => {
       mx = e.clientX;
       my = e.clientY;
-
-      // Position dot instantly
       cur.style.transform = `translate(${mx - 5}px, ${my - 5}px)`;
-
-      // Reveal on first move
       if (!firstMove) {
         firstMove = true;
         cur.classList.add('visible');
@@ -99,7 +137,6 @@ if (cur && ring) {
       }
     });
 
-    // Ring follows with smooth lag
     (function animRing() {
       rx += (mx - rx) * 0.12;
       ry += (my - ry) * 0.12;
@@ -107,7 +144,6 @@ if (cur && ring) {
       requestAnimationFrame(animRing);
     })();
 
-    // Hide custom cursor when mouse leaves the window
     document.addEventListener('mouseleave', () => {
       cur.classList.remove('visible');
       ring.classList.remove('visible');
@@ -119,7 +155,6 @@ if (cur && ring) {
       }
     });
 
-    // Grow dot on interactive elements for feedback
     const interactives = 'a, button, input, select, textarea, [onclick], .action-btn, .emo-pill, .mic-btn, .send-btn';
     document.addEventListener('mouseover', (e) => {
       if (e.target.closest(interactives)) {
@@ -159,7 +194,8 @@ let currentEmotion = 'calm';
 function setEmotion(emotion) {
   currentEmotion = emotion;
   document.body.className = 'emotion-' + emotion;
-  if (canUseCustomCursor) document.body.classList.add('custom-cursor-enabled');
+  // FIX: canUseCustomCursor was undefined — use class presence check instead
+  if (cur && ring) document.body.classList.add('custom-cursor-enabled');
 
   const label = document.getElementById('emotion-label');
   const statusEmo = document.getElementById('status-emotion');
@@ -177,21 +213,19 @@ function setEmotion(emotion) {
   const navLogo = document.querySelector('.nav-logo');
   if (navLogo) {
     navLogo.style.color =
-      emotion === 'panic' ? 'var(--emotion-panic-color)' :
+      emotion === 'panic'   ? 'var(--emotion-panic-color)'   :
       emotion === 'concern' ? 'var(--emotion-concern-color)' :
       'var(--accent)';
   }
 }
 
 // ── API HELPERS ───────────────────────────────────────────────────────────────
-
-// POST /ask  — now includes language
 async function apiAsk(query) {
   const requestBody = {
     user_id: API_CONFIG.userId,
     query,
     location: API_CONFIG.location,
-    language: API_CONFIG.language,   // FIX: was missing before
+    language: API_CONFIG.language,
   };
 
   console.log('📤 POST /ask', requestBody);
@@ -210,20 +244,18 @@ async function apiAsk(query) {
     return data;
   } catch (error) {
     console.error('❌ API Error:', error);
-    // Try offline cache before showing error
     return offlineFallback(query);
   }
 }
 
-// Offline fallback — reads from SW-cached responses if available
 async function offlineFallback(query) {
   try {
-    const resp = await fetch('/offline-responses.json');
+    const resp = await fetch('./offline-responses.json');
     const data = await resp.json();
     const lower = query.toLowerCase();
     const matched = data.find(r => r.keywords && r.keywords.some(k => lower.includes(k)));
     if (matched) return matched;
-  } catch (_) { /* cache miss, no SW */ }
+  } catch (_) { }
 
   return {
     response: 'Unable to connect to the server. Please check your internet connection.\n\nFor emergencies, call 108 immediately.',
@@ -232,7 +264,6 @@ async function offlineFallback(query) {
   };
 }
 
-// POST /memory
 async function apiStoreMemory(key, value) {
   try {
     const response = await fetch(`${API_CONFIG.baseUrl}/memory`, {
@@ -247,19 +278,18 @@ async function apiStoreMemory(key, value) {
   }
 }
 
-// GET /memory
 async function apiGetMemory() {
   try {
     const response = await fetch(`${API_CONFIG.baseUrl}/memory/${API_CONFIG.userId}`);
     if (response.ok) {
       const data = await response.json();
-      // Restore saved language preference
       if (data.language) {
         API_CONFIG.language = data.language;
         const sel = document.getElementById('language-select');
         if (sel) sel.value = data.language;
+        const respSel = document.getElementById('response-language');
+        if (respSel) respSel.value = data.language;
       }
-      // Restore saved theme
       if (data.theme) {
         const themeSel = document.getElementById('theme-select');
         if (themeSel) {
@@ -278,12 +308,10 @@ async function apiGetMemory() {
 }
 
 // ── TTS AUDIO PLAYBACK ────────────────────────────────────────────────────────
-// If the API response contains an audioUrl (base64 data URL from Vapi), play it.
 let currentAudio = null;
 
 function playAudioResponse(audioUrl) {
   if (!audioUrl) return;
-  // Stop any currently playing audio
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
@@ -316,28 +344,71 @@ function callAmbulance() {
 
   document.getElementById('response-section').scrollIntoView({ behavior: 'smooth' });
 
-  // FIX: Actually open the phone dialer on mobile
   setTimeout(() => {
     window.location.href = 'tel:108';
-  }, 500); // small delay so the UI update renders first
+  }, 500);
 }
 
 window.callAmbulance = callAmbulance;
 
 // ── VOICE INPUT ───────────────────────────────────────────────────────────────
 let isListening = false;
-let recognition = null;
+let currentRecognition = null;
 let restartTimeout = null;
 
 function toggleListening() {
-  isListening ? stopListening() : startListening();
+  if (vapi) {
+    vapiCallActive ? stopVapiCall() : startVapiCall();
+  } else {
+    isListening ? stopListening() : startListening();
+  }
+}
+
+function startVapiCall() {
+  if (vapiCallActive) return;
+  vapiCallActive = true;
+  isListening = true;
+
+  document.body.classList.add('listening');
+  document.getElementById('mic-btn').textContent = '⏹';
+  document.getElementById('mic-label').textContent = 'CONNECTING...';
+
+  vapi.start(VAPI_CONFIG.assistantId, {
+    variableValues: {
+      user_id: API_CONFIG.userId,
+      location: API_CONFIG.location,
+      language: API_CONFIG.language,
+    }
+  });
+}
+
+function stopVapiCall() {
+  if (!vapiCallActive) return;
+  vapi.stop();
+  vapiCallActive = false;
+}
+
+function stopListening() {
+  isListening = false;
+  if (restartTimeout) clearTimeout(restartTimeout);
+  if (currentRecognition) {
+    currentRecognition.stop();
+    currentRecognition = null;
+  }
+  document.body.classList.remove('listening');
+  document.getElementById('mic-btn').textContent = '🎙';
+  document.getElementById('mic-label').textContent = 'TAP TO SPEAK';
+
+  // Auto-submit if there's a transcript
+  const query = document.getElementById('query-input').value.trim();
+  if (query) submitQuery();
 }
 
 let finalTranscript = '';
 
 function startListening() {
   if (isListening) return;
-  
+
   isListening = true;
   finalTranscript = '';
   document.getElementById('query-input').value = '';
@@ -346,8 +417,6 @@ function startListening() {
   document.getElementById('mic-label').textContent = 'LISTENING...';
 
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-
-  // Cancel any pending restart
   if (restartTimeout) clearTimeout(restartTimeout);
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -387,9 +456,7 @@ function startListening() {
   currentRecognition.onend = () => {
     if (isListening) {
       restartTimeout = setTimeout(() => {
-        if (isListening) {
-          startListening(); // fresh instance
-        }
+        if (isListening) startListening();
       }, 300);
     }
   };
@@ -397,71 +464,6 @@ function startListening() {
   currentRecognition.start();
 }
 
-function startListening() {
-  if (isListening) return;
-  
-  isListening = true;
-  finalTranscript = '';
-  document.getElementById('query-input').value = '';
-  document.body.classList.add('listening');
-  document.getElementById('mic-btn').textContent = '⏹';
-  document.getElementById('mic-label').textContent = 'LISTENING...';
-
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-
-  // Cancel any pending restart
-  if (restartTimeout) clearTimeout(restartTimeout);
-
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    console.error('Speech recognition not supported');
-    stopListening();
-    return;
-  }
-
-  currentRecognition = new SR();
-  currentRecognition.lang = languageToLocale(API_CONFIG.language);
-  currentRecognition.continuous = true;
-  currentRecognition.interimResults = true;
-  currentRecognition.maxAlternatives = 1;
-
-  currentRecognition.onresult = (e) => {
-    let interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const transcript = e.results[i][0].transcript;
-      if (e.results[i].isFinal) {
-        finalTranscript += transcript + ' ';
-      } else {
-        interim += transcript;
-      }
-    }
-    document.getElementById('query-input').value = finalTranscript + interim;
-  };
-
-  currentRecognition.onerror = (e) => {
-    if (e.error === 'no-speech') return;
-    console.warn('Speech recognition error:', e.error);
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-      stopListening();
-    }
-  };
-
-  currentRecognition.onend = () => {
-    if (isListening) {
-      restartTimeout = setTimeout(() => {
-        if (isListening) {
-          startListening(); // fresh instance
-        }
-      }, 300);
-    }
-  };
-
-  currentRecognition.start();
-}
-
-/**
- * Map our language names to BCP-47 locale codes for Web Speech API
- */
 function languageToLocale(lang) {
   const map = {
     english: 'en-IN',
@@ -530,9 +532,7 @@ function handleAction(action) {
   responseEl.style.whiteSpace = 'pre-line';
   addMemory(messages[action], 'ACTION');
 
-  if (action === 'call_ambulance') {
-    callAmbulance();
-  }
+  if (action === 'call_ambulance') callAmbulance();
 }
 
 // ── MEMORY LIST HELPERS ───────────────────────────────────────────────────────
@@ -585,10 +585,7 @@ async function submitQuery() {
   currentActions = result.actions;
   updateActionButtons(result.actions, result.emotion);
 
-  // FIX: Play TTS audio if backend returned one
-  if (result.audioUrl) {
-    playAudioResponse(result.audioUrl);
-  }
+  if (result.audioUrl) playAudioResponse(result.audioUrl);
 
   addMemory('Response delivered · Emotion: ' + result.emotion.toUpperCase(), 'RESPONSE');
   document.getElementById('response-section').scrollIntoView({ behavior: 'smooth' });
@@ -612,25 +609,33 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 (async function init() {
-  await apiGetMemory();  // restores saved language + theme preferences
+  await apiGetMemory();
+  initVapi();
 })();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SETTINGS FUNCTIONS
-// ─────────────────────────────────────────────────────────────────────────────
-
-// FIX: updateLanguage now updates API_CONFIG.language so every subsequent
-//      /ask call uses the correct language, and stores it in memory
+// ── SETTINGS FUNCTIONS ────────────────────────────────────────────────────────
 function updateLanguage() {
   const language = document.getElementById('language-select').value;
-  API_CONFIG.language = language;   // FIX: was missing before
+  API_CONFIG.language = language;
+  const respLang = document.getElementById('response-language');
+  if (respLang) respLang.value = language;
   console.log('Language changed to:', language);
   addMemory('Language preference set to: ' + language, 'SETTING');
   apiStoreMemory('language', language);
 }
 
+function updateResponseLanguage() {
+  const language = document.getElementById('response-language').value;
+  API_CONFIG.language = language;
+  console.log('Response language changed to:', language);
+  addMemory('Response language set to: ' + language, 'SETTING');
+  apiStoreMemory('language', language);
+}
+
+document.getElementById('response-language')?.addEventListener('change', updateResponseLanguage);
+
 const speedSlider = document.getElementById('speech-speed');
-const speedValue = document.getElementById('speed-value');
+const speedValue  = document.getElementById('speed-value');
 if (speedSlider && speedValue) {
   speedSlider.addEventListener('input', function () {
     const speed = parseFloat(this.value).toFixed(1);
@@ -640,7 +645,7 @@ if (speedSlider && speedValue) {
 }
 
 const volumeSlider = document.getElementById('alert-volume');
-const volumeValue = document.getElementById('volume-value');
+const volumeValue  = document.getElementById('volume-value');
 if (volumeSlider && volumeValue) {
   volumeSlider.addEventListener('input', function () {
     volumeValue.textContent = this.value + '%';
@@ -712,11 +717,15 @@ async function saveAllSettings() {
     fontSize:          g('font-size')?.value,
   };
 
-  // Update in-memory language immediately
-  if (settings.language) API_CONFIG.language = settings.language;
+  const effectiveLanguage = settings.responseLanguage || settings.language;
+  if (effectiveLanguage) {
+    API_CONFIG.language = effectiveLanguage;
+    const respLang = document.getElementById('response-language');
+    if (respLang) respLang.value = effectiveLanguage;
+    await apiStoreMemory('language', effectiveLanguage);
+  }
 
   await apiStoreMemory('user_settings', JSON.stringify(settings));
-  await apiStoreMemory('language', settings.language || 'english');
   if (settings.theme) await apiStoreMemory('theme', settings.theme);
 
   addMemory('All settings saved successfully', 'SETTINGS');
@@ -731,32 +740,32 @@ function resetSettings() {
   if (!confirm('Reset all settings to default values?')) return;
 
   const g = id => document.getElementById(id);
-  g('language-select').value = 'english';
-  g('response-language').value = 'english';
-  g('speech-speed').value = '1.0';
-  g('speed-value').textContent = 'Normal (1.0x)';
-  g('voice-gender').value = 'female';
-  g('voice-pitch').value = 'medium';
-  g('high-contrast').checked = false;
-  g('large-text').checked = false;
-  g('reduce-motion').checked = false;
-  g('screen-reader').checked = false;
-  g('sound-alerts').checked = true;
-  g('vibration').checked = true;
+  g('language-select').value    = 'english';
+  g('response-language').value  = 'english';
+  g('speech-speed').value       = '1.0';
+  g('speed-value').textContent  = 'Normal (1.0x)';
+  g('voice-gender').value       = 'female';
+  g('voice-pitch').value        = 'medium';
+  g('high-contrast').checked    = false;
+  g('large-text').checked       = false;
+  g('reduce-motion').checked    = false;
+  g('screen-reader').checked    = false;
+  g('sound-alerts').checked     = true;
+  g('vibration').checked        = true;
   g('emergency-alerts').checked = true;
-  g('alert-volume').value = '70';
+  g('alert-volume').value       = '70';
   g('volume-value').textContent = '70%';
-  g('age-group').value = 'adult';
-  g('user-gender').value = 'female';
-  g('medical-history').value = 'none';
+  g('age-group').value          = 'adult';
+  g('user-gender').value        = 'female';
+  g('medical-history').value    = 'none';
   g('emergency-contact-1').value = '';
   g('emergency-contact-2').value = '';
-  g('contact-relation').value = 'spouse';
-  g('store-history').checked = true;
-  g('share-analytics').checked = true;
+  g('contact-relation').value   = 'spouse';
+  g('store-history').checked    = true;
+  g('share-analytics').checked  = true;
   g('location-tracking').checked = true;
-  g('theme-select').value = 'dark';
-  g('font-size').value = 'medium';
+  g('theme-select').value       = 'dark';
+  g('font-size').value          = 'medium';
 
   API_CONFIG.language = 'english';
 
@@ -791,8 +800,8 @@ function clearAllData() {
     </div>
   `;
 
-  const historyList = document.getElementById('history-list');
-  historyList.innerHTML = '<div class="history-item">Data cleared — Starting fresh</div>';
+  document.getElementById('history-list').innerHTML =
+    '<div class="history-item">Data cleared — Starting fresh</div>';
 
   addMemory('All user data cleared', 'SYSTEM');
 
@@ -802,15 +811,16 @@ function clearAllData() {
   responseEl.style.whiteSpace = 'pre-line';
 }
 
-window.updateLanguage = updateLanguage;
-window.toggleHighContrast = toggleHighContrast;
-window.toggleLargeText = toggleLargeText;
-window.toggleReducedMotion = toggleReducedMotion;
-window.toggleScreenReader = toggleScreenReader;
-window.changeTheme = changeTheme;
-window.saveAllSettings = saveAllSettings;
-window.resetSettings = resetSettings;
-window.clearAllData = clearAllData;
+window.updateLanguage        = updateLanguage;
+window.updateResponseLanguage = updateResponseLanguage;
+window.toggleHighContrast    = toggleHighContrast;
+window.toggleLargeText       = toggleLargeText;
+window.toggleReducedMotion   = toggleReducedMotion;
+window.toggleScreenReader    = toggleScreenReader;
+window.changeTheme           = changeTheme;
+window.saveAllSettings       = saveAllSettings;
+window.resetSettings         = resetSettings;
+window.clearAllData          = clearAllData;
 
 document.addEventListener('DOMContentLoaded', function () {
   const speedSlider = document.getElementById('speech-speed');

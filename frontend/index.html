@@ -247,7 +247,11 @@
               </div>
               <div class="settings-item">
                 <label>Response Language</label>
-                <select id="response-language" class="settings-select">
+                <select
+                  id="response-language"
+                  class="settings-select"
+                  onchange="updateResponseLanguage()"
+                >
                   <option value="english" selected>English</option>
                   <option value="hindi">हिंदी</option>
                   <option value="kannada">ಕನ್ನಡ</option>
@@ -546,7 +550,7 @@
       <span>Architecture: Frontend ↔ Backend (/ask, /memory) ↔ Qdrant</span>
       <span id="footer-time">--:--</span>
     </footer>
-
+    <script src="https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/vapi.js"></script>
     <script src="./src/js/script.js"></script>
   </body>
 </html>
