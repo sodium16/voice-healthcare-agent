@@ -67,31 +67,77 @@ function initGeolocation() {
 initGeolocation();
 
 // ── CUSTOM CURSOR ─────────────────────────────────────────────────────────────
-const cur = document.getElementById('cursor');
+// ── CUSTOM CURSOR ─────────────────────────────────────────────────────────────
+const cur  = document.getElementById('cursor');
 const ring = document.getElementById('cursor-ring');
-const canUseCustomCursor =
-  !!(cur && ring) && window.matchMedia('(pointer: fine)').matches;
 
-if (canUseCustomCursor) {
-  document.body.classList.add('custom-cursor-enabled');
-  let mx = 0, my = 0, rx = 0, ry = 0;
+if (cur && ring) {
+  // Enable on anything with a pointer (fine OR coarse) — removes the
+  // (pointer: fine) gate that silently kills the cursor in iframes / previews
+  const hasPointer = window.matchMedia('(pointer: fine)').matches
+                  || window.matchMedia('(pointer: coarse)').matches;
 
-  window.addEventListener('mousemove', (e) => {
-    mx = e.clientX;
-    my = e.clientY;
-    cur.style.transform = `translate(${mx}px, ${my}px) translate(-50%, -50%)`;
-    // Reveal on first move (they start opacity:0 to avoid flash at 0,0)
-    cur.style.opacity = '1';
-    ring.style.opacity = '1';
-  });
+  if (hasPointer) {
+    document.body.classList.add('custom-cursor-enabled');
 
-  function animRing() {
-    rx += (mx - rx) * 0.15;
-    ry += (my - ry) * 0.15;
-    ring.style.transform = `translate(${rx}px, ${ry}px) translate(-50%, -50%)`;
-    requestAnimationFrame(animRing);
+    let mx = -100, my = -100;   // start off-screen so no flash at 0,0
+    let rx = -100, ry = -100;
+    let firstMove = false;
+
+    window.addEventListener('mousemove', (e) => {
+      mx = e.clientX;
+      my = e.clientY;
+
+      // Position dot instantly
+      cur.style.transform = `translate(${mx - 5}px, ${my - 5}px)`;
+
+      // Reveal on first move
+      if (!firstMove) {
+        firstMove = true;
+        cur.classList.add('visible');
+        ring.classList.add('visible');
+      }
+    });
+
+    // Ring follows with smooth lag
+    (function animRing() {
+      rx += (mx - rx) * 0.12;
+      ry += (my - ry) * 0.12;
+      ring.style.transform = `translate(${rx - 18}px, ${ry - 18}px)`;
+      requestAnimationFrame(animRing);
+    })();
+
+    // Hide custom cursor when mouse leaves the window
+    document.addEventListener('mouseleave', () => {
+      cur.classList.remove('visible');
+      ring.classList.remove('visible');
+    });
+    document.addEventListener('mouseenter', () => {
+      if (firstMove) {
+        cur.classList.add('visible');
+        ring.classList.add('visible');
+      }
+    });
+
+    // Grow dot on interactive elements for feedback
+    const interactives = 'a, button, input, select, textarea, [onclick], .action-btn, .emo-pill, .mic-btn, .send-btn';
+    document.addEventListener('mouseover', (e) => {
+      if (e.target.closest(interactives)) {
+        cur.style.width  = '14px';
+        cur.style.height = '14px';
+        ring.style.width  = '48px';
+        ring.style.height = '48px';
+      }
+    });
+    document.addEventListener('mouseout', (e) => {
+      if (e.target.closest(interactives)) {
+        cur.style.width  = '10px';
+        cur.style.height = '10px';
+        ring.style.width  = '36px';
+        ring.style.height = '36px';
+      }
+    });
   }
-  animRing();
 }
 
 // ── LIVE TIME ─────────────────────────────────────────────────────────────────
@@ -281,57 +327,136 @@ window.callAmbulance = callAmbulance;
 // ── VOICE INPUT ───────────────────────────────────────────────────────────────
 let isListening = false;
 let recognition = null;
+let restartTimeout = null;
 
 function toggleListening() {
   isListening ? stopListening() : startListening();
 }
 
+let finalTranscript = '';
+
 function startListening() {
+  if (isListening) return;
+  
   isListening = true;
+  finalTranscript = '';
+  document.getElementById('query-input').value = '';
   document.body.classList.add('listening');
   document.getElementById('mic-btn').textContent = '⏹';
   document.getElementById('mic-label').textContent = 'LISTENING...';
 
-  // Stop any current TTS so the mic can hear clearly
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio = null;
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+
+  // Cancel any pending restart
+  if (restartTimeout) clearTimeout(restartTimeout);
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    console.error('Speech recognition not supported');
+    stopListening();
+    return;
   }
 
-  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SR();
+  currentRecognition = new SR();
+  currentRecognition.lang = languageToLocale(API_CONFIG.language);
+  currentRecognition.continuous = true;
+  currentRecognition.interimResults = true;
+  currentRecognition.maxAlternatives = 1;
 
-    // FIX: Use the user's selected language, not hardcoded 'en-IN'
-    recognition.lang = languageToLocale(API_CONFIG.language);
-    recognition.continuous = false;
-    recognition.interimResults = false;
+  currentRecognition.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const transcript = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        finalTranscript += transcript + ' ';
+      } else {
+        interim += transcript;
+      }
+    }
+    document.getElementById('query-input').value = finalTranscript + interim;
+  };
 
-    recognition.onresult = (e) => {
-      const transcript = e.results[0][0].transcript;
-      document.getElementById('query-input').value = transcript;
+  currentRecognition.onerror = (e) => {
+    if (e.error === 'no-speech') return;
+    console.warn('Speech recognition error:', e.error);
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
       stopListening();
-      submitQuery();
-    };
-    recognition.onerror = () => stopListening();
-    recognition.onend = () => { if (isListening) stopListening(); };
-    recognition.start();
-  } else {
-    // Demo fallback
-    setTimeout(() => {
-      document.getElementById('query-input').value = 'I have a fever and headache';
-      stopListening();
-      submitQuery();
-    }, 2500);
-  }
+    }
+  };
+
+  currentRecognition.onend = () => {
+    if (isListening) {
+      restartTimeout = setTimeout(() => {
+        if (isListening) {
+          startListening(); // fresh instance
+        }
+      }, 300);
+    }
+  };
+
+  currentRecognition.start();
 }
 
-function stopListening() {
-  isListening = false;
-  document.body.classList.remove('listening');
-  document.getElementById('mic-btn').textContent = '🎙';
-  document.getElementById('mic-label').textContent = 'TAP TO SPEAK';
-  if (recognition) { try { recognition.stop(); } catch (e) {} }
+function startListening() {
+  if (isListening) return;
+  
+  isListening = true;
+  finalTranscript = '';
+  document.getElementById('query-input').value = '';
+  document.body.classList.add('listening');
+  document.getElementById('mic-btn').textContent = '⏹';
+  document.getElementById('mic-label').textContent = 'LISTENING...';
+
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+
+  // Cancel any pending restart
+  if (restartTimeout) clearTimeout(restartTimeout);
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    console.error('Speech recognition not supported');
+    stopListening();
+    return;
+  }
+
+  currentRecognition = new SR();
+  currentRecognition.lang = languageToLocale(API_CONFIG.language);
+  currentRecognition.continuous = true;
+  currentRecognition.interimResults = true;
+  currentRecognition.maxAlternatives = 1;
+
+  currentRecognition.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const transcript = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        finalTranscript += transcript + ' ';
+      } else {
+        interim += transcript;
+      }
+    }
+    document.getElementById('query-input').value = finalTranscript + interim;
+  };
+
+  currentRecognition.onerror = (e) => {
+    if (e.error === 'no-speech') return;
+    console.warn('Speech recognition error:', e.error);
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      stopListening();
+    }
+  };
+
+  currentRecognition.onend = () => {
+    if (isListening) {
+      restartTimeout = setTimeout(() => {
+        if (isListening) {
+          startListening(); // fresh instance
+        }
+      }, 300);
+    }
+  };
+
+  currentRecognition.start();
 }
 
 /**

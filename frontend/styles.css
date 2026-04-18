@@ -48,37 +48,48 @@ body.custom-cursor-enabled {
   position: fixed;
   top: 0;
   left: 0;
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   background: var(--emo-color);
   border-radius: 50%;
   pointer-events: none;
   z-index: 9999;
-  /* transform is set entirely by JS — no CSS transform here */
-  transition: background 0.3s;
-  /* Hide until first mousemove so it doesn't sit at 0,0 on load */
+  transform: translate(-50%, -50%);   /* base transform so centering is always on */
+  transition: background 0.3s, width 0.2s, height 0.2s;
+  /* Start invisible — JS reveals on first move */
   opacity: 0;
+  /* subtle white outline so it's visible on any background */
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,0.35);
+  will-change: transform, opacity;
 }
 
 #cursor-ring {
   position: fixed;
   top: 0;
   left: 0;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border: 1.5px solid var(--emo-color);
   border-radius: 50%;
   pointer-events: none;
   z-index: 9998;
-  /* transform is set entirely by JS */
-  transition: border-color 0.3s;
+  transform: translate(-50%, -50%);
+  transition: border-color 0.3s, width 0.2s, height 0.2s;
   opacity: 0;
+  will-change: transform, opacity;
 }
 
-/* Show both once the body class is applied and first move fires */
-body.custom-cursor-enabled #cursor,
-body.custom-cursor-enabled #cursor-ring {
+/* Show both once JS is ready (class added by JS, not by CSS parent rule) */
+#cursor.visible,
+#cursor-ring.visible {
   opacity: 1;
+}
+
+body.custom-cursor-enabled,
+body.custom-cursor-enabled *,
+body.custom-cursor-enabled *::before,
+body.custom-cursor-enabled *::after {
+  cursor: none !important;
 }
 
 /* EMERGENCY AMBULANCE BUTTON */

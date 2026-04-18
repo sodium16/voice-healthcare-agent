@@ -69,6 +69,12 @@ class QdrantService {
 
       log.debug(`Collection "${collectionName}" OK (size: ${existingSize || vectorConfig.SIZE})`);
     } catch (error) {
+      log.error(`Qdrant error on ${collectionName}:`, {
+        status: error.status,
+        statusCode: error.statusCode,
+        data: error.response?.data || error.message,
+        stack: error.stack,
+      });
       if (error.status === 404 || error.statusCode === 404) {
         log.info(`Creating collection "${collectionName}" (size: ${vectorConfig.SIZE})`);
         await this.client.createCollection(collectionName, {
@@ -96,10 +102,7 @@ class QdrantService {
     }
   }
 
-  /**
-   * Store query in health_queries collection
-   * @param {object} point - { id, payload: { user_id, query, ... } }
-   */
+  
   async storeQuery(point) {
     if (!this.isReady) {
       log.warn('Qdrant not ready - skipping query storage');
@@ -142,12 +145,7 @@ class QdrantService {
     }
   }
 
-  /**
-   * Retrieve user memories by user_id filter
-   * Uses a neutral query vector; filter by user_id is the main selector.
-   * @param {string} userId
-   * @returns {Promise<Array<{key, value, timestamp}>>}
-   */
+  
   async getMemories(userId) {
     if (!this.isReady) {
       log.warn('Qdrant not ready - returning empty memories');

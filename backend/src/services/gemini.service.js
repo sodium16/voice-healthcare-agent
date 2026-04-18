@@ -22,7 +22,7 @@ class GeminiService {
 
     try {
       this.client = new GoogleGenerativeAI(env.GEMINI_API_KEY);
-      this.modelName = 'gemini-flash-latest';
+      this.modelName = 'gemini-2.5-flash';
       this.model = this.client.getGenerativeModel({ model: this.modelName });
 
       // gemini-embedding-001 is the correct v1beta embedContent model (not embedding-001 or text-embedding-004)
