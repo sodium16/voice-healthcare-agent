@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// GEMINI SERVICE
-// Real AI integration using Google's Generative AI API
+// GEMINI SERVICE (FIXED + COMPLETE)
+// Real AI integration: health guidance, emotion analysis, action suggestion,
+// real embeddings, language/location/memory injection, emotion-aware tone
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -10,38 +11,114 @@ const log = require('../config/logger')('GeminiService');
 class GeminiService {
   constructor() {
     if (!env.GEMINI_API_KEY) {
-      log.warn('Gemini API key not configured - using mock responses');
+      log.warn('⚠️  Gemini API key not configured - using mock responses only');
       this.isAvailable = false;
       this.client = null;
       this.model = null;
+      this.embeddingModel = null;
+      this.modelName = null;
       return;
     }
 
     try {
       this.client = new GoogleGenerativeAI(env.GEMINI_API_KEY);
-      this.model = this.client.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      this.modelName = 'gemini-2.5-flash';
+      this.model = this.client.getGenerativeModel({ model: this.modelName });
+
+      // gemini-embedding-001 is the correct v1beta embedContent model (not embedding-001 or text-embedding-004)
+      this.embeddingModelName = 'gemini-embedding-001';
+      this.embeddingModel = this.client.getGenerativeModel({ model: this.embeddingModelName });
+
       this.isAvailable = true;
-      log.info('✅ Gemini service initialized successfully');
+      log.info(`✅ Gemini service initialized successfully with model: ${this.modelName}`);
     } catch (error) {
       log.error('Failed to initialize Gemini', error.message);
       this.isAvailable = false;
       this.client = null;
       this.model = null;
+      this.embeddingModel = null;
+      this.modelName = null;
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // REAL EMBEDDINGS
+  // Replaces all the mock new Array(384).fill(0.1) vectors
+  // ─────────────────────────────────────────────────────────────────────────
+
   /**
-   * Generate health response using Gemini AI
-   * @param {string} query - User health query
-   * @returns {Promise<string>} AI-generated response
+   * Generate a real embedding vector for a piece of text
+   * Uses gemini-embedding-001 (correct v1beta model name)
+   * Pins output to 768 dims via outputDimensionality so it matches Qdrant collection
+   * @param {string} text
+   * @returns {Promise<number[]>} 768-dim vector
    */
-  async generateHealthResponse(query) {
-    if (!this.isAvailable || !this.model) {
-      throw new Error('Gemini service not available - check API key');
+  async generateEmbedding(text) {
+    if (!this.isAvailable || !this.embeddingModel) {
+      return new Array(768).fill(0).map((_, i) => Math.sin(i * 0.1) * 0.1);
     }
 
     try {
-      const systemPrompt = `You are VAIDYA, a healthcare assistant providing guidance for people in India.
+      // outputDimensionality pins the output to 768 (default is 3072 for this model)
+      const result = await this.embeddingModel.embedContent({
+        content: { parts: [{ text }] },
+        outputDimensionality: 768,
+      });
+      return result.embedding.values;
+    } catch (error) {
+      log.error('Embedding generation failed', error.message);
+      return new Array(768).fill(0).map((_, i) => Math.sin(i * 0.1) * 0.1);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // HEALTH RESPONSE
+  // Now accepts language, location, memories, and emotion for context
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Generate health response using Gemini AI
+   * @param {string} query
+   * @param {object} options - { language, location, memories, emotion }
+   * @returns {Promise<string>}
+   */
+  async generateHealthResponse(query, options = {}) {
+    if (!this.isAvailable || !this.model) {
+      throw new Error('Gemini service not available - check API key configuration');
+    }
+
+    const language = options.language || 'english';
+    const location = options.location || 'India';
+    const memories = options.memories || {};
+    const emotion = options.emotion || 'calm';
+
+    // Build tone instruction based on detected emotion state
+    const toneInstruction = {
+      panic: 'URGENT TONE: The user is in distress. Lead immediately with the single most important action. Be brief, direct, and reassuring. Do not overwhelm with details.',
+      concern: 'MEASURED TONE: Acknowledge the concern clearly first before giving advice. Be warm but thorough. Reassure that this is manageable.',
+      calm: 'REASSURING TONE: Be warm, clear, and practical. No need to alarm the user.',
+    }[emotion] || 'REASSURING TONE: Be warm, clear, and practical.';
+
+    // Build memory context string if available
+    let memoryContext = '';
+    const memoryEntries = Object.entries(memories).filter(
+      ([k]) => !['user_id'].includes(k)
+    );
+    if (memoryEntries.length > 0) {
+      memoryContext = `\n## User Context (from memory):\n${memoryEntries.map(([k, v]) => `- ${k}: ${v}`).join('\n')}`;
+    }
+
+    const systemPrompt = `You are VAIDYA, a healthcare assistant providing guidance for people in India.
+
+## Response Language:
+Respond ENTIRELY in ${language}. If ${language} is not English, write your full response in that language. Use simple, everyday vocabulary — avoid all medical jargon.
+
+## User Location:
+The user is in ${location}. Mention locally relevant services: "Call 108 for ambulance", reference nearby hospital types relevant to their city when appropriate.
+${memoryContext}
+
+## Tone Instruction:
+${toneInstruction}
 
 ## Your Role:
 - Provide clear, simple health guidance for common symptoms
@@ -51,9 +128,9 @@ class GeminiService {
 
 ## Response Guidelines:
 1. Keep responses CONCISE (2-3 paragraphs max)
-2. Use SIMPLE, non-technical language
+2. Use SIMPLE language appropriate for low-literacy users
 3. Reference Indian medical standards (ICMR guidelines where applicable)
-4. Mention local services: "Call 108 for ambulance", "Visit your nearest hospital"
+4. Mention local services: "Call 108 for ambulance"
 5. Be EMPATHETIC and reassuring
 
 ## CRITICAL RULES (NEVER BREAK THESE):
@@ -62,51 +139,43 @@ class GeminiService {
 - NEVER diagnose definitively (e.g., "You have malaria")
   Instead: "This could indicate..."
 - NEVER prescribe treatments
-- ALWAYS recommend professional medical consultation for:
-  - Persistent symptoms (>3-5 days)
-  - Severe symptoms
-  - Any chest pain
-  - Difficulty breathing
-  - Confusion or behavior changes
-  - Any life-threatening signs
+- ALWAYS recommend professional medical consultation for persistent (>3-5 days), severe symptoms, chest pain, difficulty breathing, confusion, or any life-threatening signs
 
-## User's Query:
+## User Query:
 "${query}"
 
-## Your Response:
-Provide practical, immediately actionable guidance. Start directly without any preamble or introduction.`;
+Provide practical, immediately actionable guidance. Start directly without any preamble.`;
 
-      log.debug('Calling Gemini API', { 
-        query: query.substring(0, 50),
-        modelUsed: 'gemini-pro'
-      });
+    log.debug('Calling Gemini API', {
+      query: query.substring(0, 50),
+      language,
+      location,
+      emotion,
+      modelUsed: this.modelName,
+    });
 
-      const startTime = Date.now();
-      const result = await this.model.generateContent(systemPrompt);
-      const response = await result.response;
-      const text = response.text();
-      const duration = Date.now() - startTime;
+    const startTime = Date.now();
+    const result = await this.model.generateContent(systemPrompt);
+    const response = await result.response;
+    const text = response.text();
+    const duration = Date.now() - startTime;
 
-      log.info('Gemini response generated successfully', { 
-        length: text.length,
-        duration: `${duration}ms`
-      });
+    log.info('Gemini response generated successfully', {
+      length: text.length,
+      duration: `${duration}ms`,
+    });
 
-      return text;
-
-    } catch (error) {
-      log.error('Gemini API error', { 
-        message: error.message,
-        code: error.code || 'UNKNOWN'
-      });
-      throw error;
-    }
+    return text;
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // EMOTION ANALYSIS
+  // ─────────────────────────────────────────────────────────────────────────
 
   /**
    * Analyze emotion from query and response
-   * @param {string} query - Original user query
-   * @param {string} response - AI-generated response
+   * @param {string} query
+   * @param {string} response
    * @returns {Promise<string>} 'calm' | 'concern' | 'panic'
    */
   async analyzeEmotion(query, response) {
@@ -130,9 +199,8 @@ Respond with ONLY ONE WORD: calm, concern, or panic`;
 
       const result = await this.model.generateContent(emotionPrompt);
       const emotionText = await result.response.text();
-      const emotion = emotionText.toLowerCase().trim().split('\n')[0]; // Get first line only
+      const emotion = emotionText.toLowerCase().trim().split('\n')[0];
 
-      // Validate emotion
       const validEmotions = ['calm', 'concern', 'panic'];
       if (validEmotions.includes(emotion)) {
         log.debug('Emotion analyzed', { emotion });
@@ -141,18 +209,21 @@ Respond with ONLY ONE WORD: calm, concern, or panic`;
 
       log.warn('Invalid emotion returned, defaulting to calm', { emotion });
       return 'calm';
-
     } catch (error) {
       log.error('Emotion analysis failed', error.message);
-      return 'calm'; // Safe default
+      return 'calm';
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // ACTION SUGGESTION
+  // ─────────────────────────────────────────────────────────────────────────
+
   /**
-   * Generate suggested actions based on query
-   * @param {string} query - User health query
-   * @param {string} emotion - Current emotion state
-   * @returns {Promise<array>} Array of action strings
+   * Generate suggested actions
+   * @param {string} query
+   * @param {string} emotion
+   * @returns {Promise<string[]>}
    */
   async generateActions(query, emotion) {
     if (!this.isAvailable || !this.model) {
@@ -179,78 +250,46 @@ Return ONLY a JSON array with 2-3 action names. Example: ["action1", "action2"]`
 
       const result = await this.model.generateContent(actionPrompt);
       const actionsText = await result.response.text();
-      
-      // Parse JSON from response
-      try {
-        // Find JSON array in response
-        const jsonMatch = actionsText.match(/\[.*?\]/s);
-        if (jsonMatch) {
-          const actions = JSON.parse(jsonMatch[0]);
-          
-          // Validate and filter actions
-          const validActions = [
-            'call_ambulance',
-            'find_hospital',
-            'find_doctor',
-            'find_pharmacy',
-            'emergency_info'
-          ];
-          
-          const filteredActions = actions
-            .filter(a => validActions.includes(a))
-            .slice(0, 3); // Max 3 actions
-          
-          if (filteredActions.length > 0) {
-            log.debug('Actions generated', { count: filteredActions.length });
-            return filteredActions;
-          }
+
+      const jsonMatch = actionsText.match(/\[.*?\]/s);
+      if (jsonMatch) {
+        const actions = JSON.parse(jsonMatch[0]);
+        const validActions = [
+          'call_ambulance', 'find_hospital', 'find_doctor',
+          'find_pharmacy', 'emergency_info',
+        ];
+        const filtered = actions.filter(a => validActions.includes(a)).slice(0, 3);
+        if (filtered.length > 0) {
+          log.debug('Actions generated', { count: filtered.length });
+          return filtered;
         }
-      } catch (parseError) {
-        log.warn('Failed to parse action JSON', parseError.message);
       }
-
-      // Fallback actions based on emotion
-      if (emotion === 'panic') {
-        return ['call_ambulance', 'emergency_info'];
-      } else if (emotion === 'concern') {
-        return ['find_doctor', 'find_hospital'];
-      } else {
-        return ['find_doctor', 'find_pharmacy'];
-      }
-
     } catch (error) {
       log.error('Action generation failed', error.message);
-      
-      // Safe fallback
-      return emotion === 'panic'
-        ? ['call_ambulance', 'emergency_info']
-        : ['find_doctor'];
     }
+
+    // Fallback
+    if (emotion === 'panic') return ['call_ambulance', 'emergency_info'];
+    if (emotion === 'concern') return ['find_doctor', 'find_hospital'];
+    return ['find_doctor', 'find_pharmacy'];
   }
 
-  /**
-   * Check if Gemini service is healthy and available
-   * @returns {boolean}
-   */
+  // ─────────────────────────────────────────────────────────────────────────
+  // STATUS
+  // ─────────────────────────────────────────────────────────────────────────
+
   isHealthy() {
     return this.isAvailable && !!this.model;
   }
 
-  /**
-   * Get service status
-   * @returns {object}
-   */
   getStatus() {
     return {
       service: 'gemini',
       available: this.isAvailable,
-      model: this.isAvailable ? 'gemini-pro' : null,
+      model: this.isAvailable ? this.modelName : null,
+      embeddingModel: this.isAvailable ? this.embeddingModelName : null,
       apiKeyConfigured: !!env.GEMINI_API_KEY,
-      capabilities: [
-        'health_guidance',
-        'emotion_analysis',
-        'action_suggestion'
-      ],
+      capabilities: ['health_guidance', 'emotion_analysis', 'action_suggestion', 'embeddings'],
     };
   }
 }

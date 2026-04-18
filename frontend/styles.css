@@ -39,14 +39,57 @@ body.custom-cursor-enabled {
   cursor: none;
 }
 
-/* CUSTOM CURSOR */
-#cursor, #cursor-ring {
+/* ── CUSTOM CURSOR (FIXED) ─────────────────────────────────────────────────── */
+/* Both elements must be fixed, pointer-events:none, and start at 0,0.        */
+/* The dot (#cursor) is small and solid.                                       */
+/* The ring (#cursor-ring) is larger, hollow, and lags behind via JS lerp.    */
+
+#cursor {
   position: fixed;
   top: 0;
   left: 0;
-  pointer-events: none; /* Critical: allows you to click through the custom cursor */
+  width: 10px;
+  height: 10px;
+  background: var(--emo-color);
+  border-radius: 50%;
+  pointer-events: none;
   z-index: 9999;
-  /* Remove the old transform from the CSS block so the JS can handle it */
+  transform: translate(-50%, -50%);   /* base transform so centering is always on */
+  transition: background 0.3s, width 0.2s, height 0.2s;
+  /* Start invisible — JS reveals on first move */
+  opacity: 0;
+  /* subtle white outline so it's visible on any background */
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,0.35);
+  will-change: transform, opacity;
+}
+
+#cursor-ring {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 36px;
+  height: 36px;
+  border: 1.5px solid var(--emo-color);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9998;
+  transform: translate(-50%, -50%);
+  transition: border-color 0.3s, width 0.2s, height 0.2s;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* Show both once JS is ready (class added by JS, not by CSS parent rule) */
+#cursor.visible,
+#cursor-ring.visible {
+  opacity: 1;
+}
+
+body.custom-cursor-enabled,
+body.custom-cursor-enabled *,
+body.custom-cursor-enabled *::before,
+body.custom-cursor-enabled *::after {
+  cursor: none !important;
 }
 
 /* EMERGENCY AMBULANCE BUTTON */

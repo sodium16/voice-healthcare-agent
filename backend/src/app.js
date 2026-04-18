@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// EXPRESS APPLICATION SETUP
+// EXPRESS APPLICATION SETUP (FIXED)
 // Configure routes, middleware, and error handling
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -7,6 +7,7 @@ const express = require('express');
 const app = express();
 
 const log = require('./config/logger')('App');
+const env = require('./config/environment');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17,12 +18,17 @@ const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 app.use(express.json());
 
 // CORS (allow frontend)
+// FIX: Use FRONTEND_URL from environment, fallback to * for development
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const allowedOrigin = env.FRONTEND_URL || '*';
+  
+  res.header('Access-Control-Allow-Origin', allowedOrigin);
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   
+  // Log CORS allowed origin for debugging
   if (req.method === 'OPTIONS') {
+    log.debug('CORS preflight request', { origin: req.headers.origin, allowed: allowedOrigin });
     return res.sendStatus(200);
   }
   
@@ -67,5 +73,6 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 log.info('Express app configured successfully');
+log.info(`CORS allowed origin: ${env.FRONTEND_URL || '*'}`);
 
 module.exports = app;

@@ -20,9 +20,9 @@ const EMOTION_STATES = {
 };
 
 const TIMEOUTS = {
-  API_CALL: 30000,        // 30s for API calls
-  QDRANT_QUERY: 5000,     // 5s for Qdrant
-  VAPI_CALL: 60000,       // 60s for voice calls
+  API_CALL: 30000,
+  QDRANT_QUERY: 5000,
+  VAPI_CALL: 60000,
 };
 
 const HTTP_STATUS = {
@@ -36,20 +36,17 @@ const HTTP_STATUS = {
   SERVICE_UNAVAILABLE: 503,
 };
 
+// IMPORTANT: Must match the embedding model output dimension.
+// text-embedding-004 (Google) outputs 768-dim vectors.
 const VECTOR_CONFIG = {
-  SIZE: 384,               // Embedding dimension (OpenAI default)
+  SIZE: 768,
   DISTANCE: 'Cosine',
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// API CONTRACT (From docs/api-contract.md)
-// ─────────────────────────────────────────────────────────────────────────────
-
 const API_CONTRACT = {
-  // POST /ask
   ASK_REQUEST: {
     required: ['user_id', 'query'],
-    optional: ['location', 'context'],
+    optional: ['location', 'language', 'context'],
   },
   ASK_RESPONSE: {
     required: ['response', 'actions', 'emotion'],
@@ -59,16 +56,12 @@ const API_CONTRACT = {
       emotion: 'calm | concern | panic',
     },
   },
-  
-  // POST /memory
   MEMORY_POST_REQUEST: {
     required: ['user_id', 'key', 'value'],
   },
   MEMORY_POST_RESPONSE: {
     message: 'stored',
   },
-  
-  // GET /memory?user_id=X
   MEMORY_GET_RESPONSE: {
     example: {
       language: 'english',
@@ -78,26 +71,19 @@ const API_CONTRACT = {
   },
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DEFAULT RESPONSES
-// ─────────────────────────────────────────────────────────────────────────────
-
 const DEFAULT_RESPONSES = {
-  // When emergency is detected
   EMERGENCY: {
-    response: 'EMERGENCY DETECTED. Please contact local emergency services immediately. Call 108 for ambulance.',
+    response:
+      'EMERGENCY DETECTED. Please contact local emergency services immediately. Call 108 for ambulance.',
     actions: ['call_ambulance', 'find_hospital', 'emergency_info'],
     emotion: EMOTION_STATES.PANIC,
   },
-  
-  // When AI service is unavailable
   SERVICE_ERROR: {
-    response: 'I am currently unable to process your request. Please try again in a few moments or contact support.',
+    response:
+      'I am currently unable to process your request. Please try again in a few moments or contact support.',
     actions: ['find_doctor'],
     emotion: EMOTION_STATES.CALM,
   },
-  
-  // When query is empty/invalid
   INVALID_INPUT: {
     response: 'Please describe your health concern clearly so I can help you better.',
     actions: [],

@@ -1,0 +1,38 @@
+[
+    {
+      "keywords": ["chest", "pain", "breathe", "breathing", "heart attack"],
+      "response": "⚠ EMERGENCY: Chest pain or difficulty breathing can be life-threatening.\n\nSTOP all activity. Sit or lie down.\nDo NOT eat or drink anything.\nCall 108 (Ambulance) immediately.\n\nIf you have aspirin and no allergy, chew one tablet while waiting for help.",
+      "actions": ["call_ambulance", "find_hospital", "emergency_info"],
+      "emotion": "panic"
+    },
+    {
+      "keywords": ["fever", "temperature", "hot", "chills"],
+      "response": "You may have a fever.\n\n• Rest and stay in a cool room\n• Drink plenty of water or ORS\n• Take an over-the-counter fever medicine (e.g. paracetamol)\n• Monitor temperature every 2–3 hours\n\nSee a doctor if fever exceeds 40°C or lasts more than 3 days.",
+      "actions": ["find_doctor", "find_pharmacy"],
+      "emotion": "calm"
+    },
+    {
+      "keywords": ["headache", "head", "migraine"],
+      "response": "For a headache:\n\n• Rest in a quiet, dark room\n• Drink water — dehydration is a common cause\n• Apply a cool cloth to your forehead\n• Take an over-the-counter pain reliever\n\nSeek emergency care if the headache is sudden and very severe, or comes with vision changes or stiff neck.",
+      "actions": ["find_doctor", "find_pharmacy"],
+      "emotion": "calm"
+    },
+    {
+      "keywords": ["cold", "cough", "runny nose", "sneeze", "sore throat"],
+      "response": "Sounds like a common cold.\n\n• Rest well\n• Drink warm fluids (honey-ginger tea, warm water with lemon)\n• Gargle with warm salt water for throat pain\n• Avoid cold drinks and spicy food\n\nConsult a doctor if symptoms last more than 7–10 days or fever develops.",
+      "actions": ["find_doctor", "find_pharmacy"],
+      "emotion": "calm"
+    },
+    {
+      "keywords": ["nausea", "vomiting", "diarrhea", "stomach", "loose motion"],
+      "response": "For digestive problems:\n\n• Drink ORS (Oral Rehydration Solution) or clean water frequently\n• Eat bland foods: rice, banana, plain toast\n• Avoid dairy, spicy, and fatty food\n• Rest\n\nSeek medical help if symptoms persist beyond 2 days, or if you see blood.",
+      "actions": ["find_doctor", "find_pharmacy"],
+      "emotion": "calm"
+    },
+    {
+      "keywords": ["unconscious", "faint", "passed out", "seizure"],
+      "response": "⚠ EMERGENCY: Someone is unconscious or having a seizure.\n\n1. Call 108 immediately\n2. Place them on their side (recovery position)\n3. Do NOT put anything in their mouth\n4. Do NOT leave them alone\n5. Stay on the line with emergency services",
+      "actions": ["call_ambulance", "emergency_info"],
+      "emotion": "panic"
+    }
+  ]
